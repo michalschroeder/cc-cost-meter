@@ -1,0 +1,63 @@
+# cc-cost-meter
+
+A [Claude Code](https://claude.com/claude-code) skill that explains **where a session's
+tokens and dollars went**. It breaks a session's spend down by token type, model, turn, and
+subagent, attributes what filled the context window, and produces an interactive HTML report.
+
+Costs are **recomputed from raw token counts × LiteLLM per-token prices** (not Claude's
+reported totals), so the numbers are itemized and auditable. Pure Node stdlib — no install,
+no dependencies, runs offline against a bundled price snapshot.
+
+## What it answers
+
+- Why was this session expensive? What was the single biggest lever?
+- Which files / commands / prompts filled the context window (and the carried re-read cost)?
+- How much did reasoning (thinking tokens) cost, and which prompts drove it?
+- How much did each skill dispatch / subagent / model cost?
+- How much would a `/compact` have saved (spend above 200k context)?
+
+## Usage
+
+As a Claude Code skill:
+
+```
+/cc-cost-meter 848c5b25                # detail report for a session (by id prefix)
+/cc-cost-meter list --last 20          # rank recent sessions by cost
+/cc-cost-meter 848c5b25 --config-dir ~/.claude-other
+```
+
+Or drive the analyzer directly (JSON output, no model needed):
+
+```bash
+node scripts/analyze.js list --last 10                 # recent sessions + budget periods
+node scripts/analyze.js <session-id-prefix>            # full per-session cost breakdown
+```
+
+Flags: `--config-dir <path>` (transcript root, default `~/.claude`), `--out <path>`
+(report path), `--last N`, `--since YYYY-MM-DD`.
+
+## Install
+
+Drop the directory into your Claude Code skills location (e.g. `~/.claude/skills/cc-cost-meter`
+or a project's `.agents/skills/`), then invoke `/cc-cost-meter`.
+
+## Layout
+
+- `SKILL.md` — the skill definition and workflow (start here).
+- `scripts/analyze.js` — self-contained JSON analyzer; `render-report.js`, `apply-summaries.js`.
+- `scripts/lib/` — the cost engine (transcript parsing, per-call cost math, aggregation).
+- `data/model_prices.json` — bundled LiteLLM price snapshot (offline default).
+- `assets/report-template.html` — the HTML report template.
+- `REFERENCE.md` / `DESIGN.md` — the cost model and design notes.
+- `SYNC.md` — how the cost engine is vendored from
+  [claude-statusline](https://github.com/michalschroeder/claude-statusline).
+
+## Tests
+
+```bash
+node --test scripts/test/*.test.js
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
