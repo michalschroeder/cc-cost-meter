@@ -1,0 +1,127 @@
+{
+  "session": "0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+  "title": "Refactor the auth module onto the new token service and add tests",
+  "startedAt": "2026-06-15T09:12:00.000Z",
+  "totalCost": 3.18,
+  "steps": 12,
+  "components": { "input": 0.05, "output": 0.9, "cacheWrite": 0.8, "cacheRead": 1.43, "web": 0 },
+  "byModel": [
+    { "model": "claude-opus-4-8", "cost": 3.18, "calls": 12 }
+  ],
+  "byAgent": [
+    { "name": "main", "label": "main session", "cost": 3.18 },
+    { "name": "agent-1", "label": "Explore the auth module and map every caller of the old token helper", "cost": 0.22 },
+    { "name": "agent-2", "label": "Draft the migration to the new token service in an isolated worktree", "cost": 0.19 }
+  ],
+  "turns": [
+    { "turnIndex": 4, "prompt": "fix the failing integration test", "kind": "user", "cost": 0.93, "peakContext": 214000,
+      "summary": "Pointed the agent at the one red integration test after the refactor and told it to make it pass without touching the new token service." },
+    { "turnIndex": 3, "prompt": "<task-notification> subagent results", "kind": "subagent-orchestration", "cost": 0.54, "peakContext": 158000 },
+    { "turnIndex": 2, "prompt": "Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ...", "kind": "skill", "cost": 0.38, "peakContext": 96000, "skill": "test-driven-development",
+      "summary": "Ran the test-driven-development skill: wrote the failing token-service tests first, then implemented against them." },
+    { "turnIndex": 1, "prompt": "Refactor the auth module to use the new token service and add tests", "kind": "user", "cost": 0.33, "peakContext": 61000,
+      "summary": "Kicked off the work: replace the old in-process token helper with the new token service across the auth module, with test coverage." }
+  ],
+  "calls": [
+    { "seq": 1, "agent": "main", "isMain": true, "cost": 0.12, "prompt": "Refactor the auth module to use the new token service and add tests", "turnIndex": 1,
+      "tokens": { "input": 1500, "cacheRead": 25000, "cacheWrite": 8000, "output": 600 } },
+    { "seq": 2, "agent": "main", "isMain": true, "cost": 0.10, "prompt": "Refactor the auth module to use the new token service and add tests", "turnIndex": 1,
+      "tokens": { "input": 0, "cacheRead": 42000, "cacheWrite": 4000, "output": 800 } },
+    { "seq": 3, "agent": "main", "isMain": true, "cost": 0.11, "prompt": "Refactor the auth module to use the new token service and add tests", "turnIndex": 1,
+      "tokens": { "input": 0, "cacheRead": 61000, "cacheWrite": 3000, "output": 700 } },
+    { "seq": 4, "agent": "main", "isMain": true, "cost": 0.18, "prompt": "Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ...", "turnIndex": 2,
+      "tokens": { "input": 0, "cacheRead": 78000, "cacheWrite": 6000, "output": 900 } },
+    { "seq": 5, "agent": "main", "isMain": true, "cost": 0.20, "prompt": "Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ...", "turnIndex": 2,
+      "tokens": { "input": 0, "cacheRead": 96000, "cacheWrite": 3000, "output": 1100 } },
+    { "seq": 6, "agent": "agent-1", "isMain": false, "cost": 0.22, "prompt": null, "turnIndex": null,
+      "tokens": { "input": 2000, "cacheRead": 30000, "cacheWrite": 12000, "output": 1500 } },
+    { "seq": 7, "agent": "agent-2", "isMain": false, "cost": 0.19, "prompt": null, "turnIndex": null,
+      "tokens": { "input": 1800, "cacheRead": 28000, "cacheWrite": 10000, "output": 1300 } },
+    { "seq": 8, "agent": "main", "isMain": true, "cost": 0.24, "prompt": "<task-notification> subagent results", "turnIndex": 3,
+      "tokens": { "input": 0, "cacheRead": 132000, "cacheWrite": 5000, "output": 600 } },
+    { "seq": 9, "agent": "main", "isMain": true, "cost": 0.30, "prompt": "<task-notification> subagent results", "turnIndex": 3,
+      "tokens": { "input": 0, "cacheRead": 158000, "cacheWrite": 4000, "output": 1400 } },
+    { "seq": 10, "agent": "main", "isMain": true, "cost": 0.34, "prompt": "fix the failing integration test", "turnIndex": 4,
+      "tokens": { "input": 0, "cacheRead": 188000, "cacheWrite": 3000, "output": 800 } },
+    { "seq": 11, "agent": "main", "isMain": true, "cost": 0.41, "prompt": "fix the failing integration test", "turnIndex": 4,
+      "tokens": { "input": 0, "cacheRead": 214000, "cacheWrite": 2000, "output": 1200 } },
+    { "seq": 12, "agent": "main", "isMain": true, "cost": 0.18, "prompt": "fix the failing integration test", "turnIndex": 4,
+      "tokens": { "input": 0, "cacheRead": 96000, "cacheWrite": 5000, "output": 700 } }
+  ],
+  "summary": {
+    "durationMs": 4200000,
+    "mainSteps": 10,
+    "sessionBaselineTokens": 34500,
+    "contextResetDropTokens": 100000,
+    "contextGrowth": { "firstCall": 25000, "quartileAvgContext": [50000, 95000, 150000, 200000], "peakContext": 214000 },
+    "highContextCost": { "thresholdTokens": 200000, "calls": 1, "cost": 0.41 },
+    "contextResets": 1,
+    "contextConsumers": {
+      "note": "estTokens ≈ chars/4 — estimates, not billed figures.",
+      "totalEstTokens": 96000,
+      "byTool": [
+        { "tool": "Read", "count": 6, "estTokens": 52000, "carriedCost": 0.78 },
+        { "tool": "Bash", "count": 5, "estTokens": 26000, "carriedCost": 0.34 },
+        { "tool": "Grep", "count": 4, "estTokens": 18000, "carriedCost": 0.21 }
+      ],
+      "top": [
+        { "tool": "Read", "target": "/repo/src/auth/token-service.ts", "count": 3, "estTokens": 31000, "carriedCost": 0.46,
+          "summary": "The new token-service module the refactor targets — re-read on every step because the implementation kept referring back to its full surface area." },
+        { "tool": "Bash", "target": "npm test -- auth", "count": 4, "estTokens": 22000, "carriedCost": 0.29,
+          "summary": "The auth test-suite run, repeated through the red/green loop — each full run's output stayed in context and was re-read by later steps." },
+        { "tool": "Read", "target": "/repo/src/auth/legacy-token-helper.ts", "count": 2, "estTokens": 19000, "carriedCost": 0.24,
+          "summary": "The old in-process token helper being removed; kept in context while the agent confirmed each caller was migrated." },
+        { "tool": "Grep", "target": "useTokenHelper(", "count": 4, "estTokens": 14000, "carriedCost": 0.17,
+          "summary": "The call-site search for the old helper — four passes as the agent widened the pattern to catch every usage." }
+      ]
+    },
+    "assistantOutput": {
+      "note": "output split by kind",
+      "byKind": {
+        "text": { "tokens": 4200, "cost": 0.10 },
+        "thinking": { "tokens": 58000, "cost": 0.62 },
+        "toolCalls": { "tokens": 9000, "cost": 0.18 }
+      },
+      "thinking": {
+        "storedTokens": 9000,
+        "unstoredTokens": 49000,
+        "stepsWithThinking": 8,
+        "mainSteps": 10,
+        "avgPerThinkingStep": 7250,
+        "peakStep": { "seq": 11, "tokens": 9800, "nextTools": ["Edit", "Bash"] },
+        "topSteps": [
+          { "seq": 11, "tokens": 9800, "trigger": { "tool": "Bash", "target": "npm test -- auth" }, "nextTools": ["Edit", "Bash"] },
+          { "seq": 9, "tokens": 7400, "trigger": { "tool": "Read", "target": "/repo/src/auth/token-service.ts" }, "nextTools": ["Edit"] },
+          { "seq": 5, "tokens": 6100, "trigger": { "tool": "user-prompt", "target": "wrote the failing tests first" }, "nextTools": ["Write"] }
+        ],
+        "byTurn": [
+          { "turnIndex": 4, "prompt": "fix the failing integration test", "kind": "user", "steps": 4, "thinkingTokens": 24000 },
+          { "turnIndex": 2, "prompt": "Base directory for this skill: /home/u/.claude/skills/test-driven-development ...", "kind": "skill", "steps": 3, "thinkingTokens": 19000 },
+          { "turnIndex": 1, "prompt": "Refactor the auth module to use the new token service and add tests", "kind": "user", "steps": 1, "thinkingTokens": 15000 }
+        ]
+      }
+    },
+    "bySkill": [
+      { "skill": "test-driven-development", "turns": 1, "steps": 5, "cost": 0.58, "tokens": { "input": 0, "cacheRead": 110000, "cacheWrite": 9000, "output": 3100 } }
+    ],
+    "aiAssessment": {
+      "rating": 3,
+      "headline": "Solid delegation up front, but the context ran hot through a long red/green test loop at the end.",
+      "cards": [
+        { "verdict": "good", "title": "Offloaded the exploration to subagents",
+          "what": "Two subagents ($0.22 + $0.19) mapped every caller of the old token helper and drafted the migration in an isolated worktree, so the bulky search output never piled up in the main window.",
+          "why": "Subagent context is thrown away when they return — only their conclusions came back, so the main session stayed lean while the heavy reading happened elsewhere.",
+          "how": "Keep dispatching exploration and codebase-mapping to subagents; it's the single biggest reason the first half of this session was cheap." },
+        { "verdict": "bad", "title": "The test loop re-read a 214k context every step",
+          "what": "The final 'fix the failing test' turn climbed to 214k tokens of context and cost $0.93 — over a quarter of the session — across a red/green loop where each npm test run's full output stayed in the window.",
+          "why": "Every step re-reads the entire conversation (the cache-read line, $1.43 of the $3.18 total). Once the window is that large, each additional test run is billed against all 214k tokens, not just the new output.",
+          "how": "When a test loop drags on past a few iterations, run /compact to drop the stale earlier output, or ask a subagent to run the failing test and report only pass/fail plus the relevant error — don't keep full test logs in the main window." },
+        { "verdict": "warn", "title": "Reasoning concentrated on one step",
+          "what": "Thinking was 58k tokens / $0.62 of output, and step 11 alone burned 9.8k of it right after a test run.",
+          "why": "Big context plus an ambiguous failure makes the model reason longer before acting; that thinking is billed at the output rate and most of it (49k) is interleaved, so it never even shows up in the transcript.",
+          "how": "Give the model a sharper target before a heavy step — paste the exact failing assertion and file rather than 'fix the failing test' — so it spends fewer tokens re-deriving what's wrong." }
+      ]
+    }
+  },
+  "legend": "Mock session — costs are illustrative, generated by render-report.js --mock for previewing the report template."
+}

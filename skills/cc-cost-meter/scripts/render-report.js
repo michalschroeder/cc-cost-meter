@@ -14,6 +14,9 @@ const fs = require('fs');
 const path = require('path');
 
 const TEMPLATE = path.join(__dirname, '..', 'assets', 'report-template.html');
+// A fully-populated, pre-merged detail payload (turn/consumer summaries and aiAssessment
+// already inlined) so `--mock` can render a complete demo report with no session or model.
+const MOCK_DETAIL = path.join(__dirname, '..', 'assets', 'mock-detail.json');
 
 // ---- formatting helpers -------------------------------------------------------
 
@@ -493,13 +496,14 @@ function render(detail, template) {
 // ---- cli ----------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const opts = { out: null };
+  const opts = { out: null, mock: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') {
       const v = argv[i + 1];
       if (v == null || v.startsWith('--')) { process.stderr.write('render-report.js: --out requires a path\n'); process.exit(1); }
       opts.out = v; i++;
     }
+    else if (argv[i] === '--mock') opts.mock = true;
     else { process.stderr.write(`render-report.js: unexpected argument '${argv[i]}'\n`); process.exit(1); }
   }
   return opts;
@@ -517,7 +521,8 @@ function readStdin() {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const raw = await readStdin();
+  // --mock: skip stdin, render the bundled demo payload — a complete report without a session.
+  const raw = opts.mock ? fs.readFileSync(MOCK_DETAIL, 'utf8') : await readStdin();
   let detail;
   try { detail = JSON.parse(raw); }
   catch { process.stderr.write('render-report.js: stdin is not valid JSON (pipe `analyze.js <prefix>` into me)\n'); process.exit(1); }

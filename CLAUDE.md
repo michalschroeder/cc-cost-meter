@@ -22,6 +22,9 @@ node --test skills/cc-cost-meter/scripts/test/smoke.test.js
 cd skills/cc-cost-meter
 node scripts/analyze.js list --last 10          # rank recent sessions by cost
 node scripts/analyze.js <session-id-prefix>     # full per-session detail JSON
+
+# Preview the report template with no session/model — renders a bundled mock payload
+node scripts/render-report.js --mock --out /tmp/mock-report.html
 ```
 
 `analyze.js` reads transcripts from `--config-dir <path>` (or `$CLAUDE_CONFIG_DIR`, default

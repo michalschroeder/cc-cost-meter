@@ -389,6 +389,17 @@ test('render: empty subagents → placeholder, not a blank table', () => {
   assert.match(html, /no subagents/);
 });
 
+test('mock fixture renders a complete report (no unfilled slots, grade + summaries present)', () => {
+  const mock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'mock-detail.json'), 'utf8'));
+  const html = render(mock, TEMPLATE);
+  assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'unfilled slot in mock report');
+  assert.match(html, /class="grade grade-3"/);              // aiAssessment is inlined → grade badge
+  assert.match(html, /Offloaded the exploration to subagents/);
+  assert.match(html, /token-service\.ts/);                  // consumer summary/target present
+  assert.match(html, /<svg class="ctx-chart"/);             // timeline drew
+  assert.match(html, /test-driven-development/);            // by-skill row
+});
+
 test('formatting helpers', () => {
   assert.strictEqual(money(4.5287), '$4.53');
   assert.strictEqual(money(0.0021), '$0.0021'); // sub-cent stays informative
