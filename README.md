@@ -8,6 +8,9 @@ Costs are **recomputed from raw token counts × LiteLLM per-token prices** (not 
 reported totals), so the numbers are itemized and auditable. Pure Node stdlib — no install,
 no dependencies, runs offline against a bundled price snapshot.
 
+**▶ [See a live sample report](https://michalschroeder.github.io/cc-cost-meter/)** — the full
+interactive HTML for a mock session (context timeline, per-turn spend, thinking breakdown, grade).
+
 ## What it answers
 
 - Why was this session expensive? What was the single biggest lever?
@@ -53,7 +56,9 @@ cp -r skills/cc-cost-meter ~/.claude/skills/        # or a project's .agents/ski
   - `scripts/analyze.js` — self-contained JSON analyzer; `render-report.js`, `apply-summaries.js`.
   - `scripts/lib/` — the cost engine (transcript parsing, per-call cost math, aggregation).
   - `data/model_prices.json` — bundled LiteLLM price snapshot (offline default).
-  - `assets/report-template.html` — the HTML report template.
+  - `assets/report-template.html` — the HTML report template; `assets/mock-detail.json` — the
+    demo payload behind the [sample report](https://michalschroeder.github.io/cc-cost-meter/)
+    (`node scripts/render-report.js --mock --out ../../docs/index.html` to regenerate it).
   - `REFERENCE.md` / `DESIGN.md` — the cost model and design notes.
   - `SYNC.md` — how the cost engine is vendored from
     [claude-statusline](https://github.com/michalschroeder/claude-statusline).
