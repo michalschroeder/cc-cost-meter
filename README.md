@@ -29,6 +29,7 @@ As a Claude Code skill:
 Or drive the analyzer directly (JSON output, no model needed):
 
 ```bash
+cd skills/cc-cost-meter
 node scripts/analyze.js list --last 10                 # recent sessions + budget periods
 node scripts/analyze.js <session-id-prefix>            # full per-session cost breakdown
 ```
@@ -38,24 +39,29 @@ Flags: `--config-dir <path>` (transcript root, default `~/.claude`), `--out <pat
 
 ## Install
 
-Drop the directory into your Claude Code skills location (e.g. `~/.claude/skills/cc-cost-meter`
-or a project's `.agents/skills/`), then invoke `/cc-cost-meter`.
+The skill lives in [`skills/cc-cost-meter/`](skills/cc-cost-meter). Copy that directory into
+your Claude Code skills location, then invoke `/cc-cost-meter`:
+
+```bash
+cp -r skills/cc-cost-meter ~/.claude/skills/        # or a project's .agents/skills/
+```
 
 ## Layout
 
-- `SKILL.md` — the skill definition and workflow (start here).
-- `scripts/analyze.js` — self-contained JSON analyzer; `render-report.js`, `apply-summaries.js`.
-- `scripts/lib/` — the cost engine (transcript parsing, per-call cost math, aggregation).
-- `data/model_prices.json` — bundled LiteLLM price snapshot (offline default).
-- `assets/report-template.html` — the HTML report template.
-- `REFERENCE.md` / `DESIGN.md` — the cost model and design notes.
-- `SYNC.md` — how the cost engine is vendored from
-  [claude-statusline](https://github.com/michalschroeder/claude-statusline).
+- `skills/cc-cost-meter/` — the skill (copy this into your skills location).
+  - `SKILL.md` — the skill definition and workflow (start here).
+  - `scripts/analyze.js` — self-contained JSON analyzer; `render-report.js`, `apply-summaries.js`.
+  - `scripts/lib/` — the cost engine (transcript parsing, per-call cost math, aggregation).
+  - `data/model_prices.json` — bundled LiteLLM price snapshot (offline default).
+  - `assets/report-template.html` — the HTML report template.
+  - `REFERENCE.md` / `DESIGN.md` — the cost model and design notes.
+  - `SYNC.md` — how the cost engine is vendored from
+    [claude-statusline](https://github.com/michalschroeder/claude-statusline).
 
 ## Tests
 
 ```bash
-node --test scripts/test/*.test.js
+node --test skills/cc-cost-meter/scripts/test/*.test.js
 ```
 
 ## License
