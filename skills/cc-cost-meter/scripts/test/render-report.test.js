@@ -449,3 +449,20 @@ test('render: verdict section renders before the context chart (payoff first)', 
   assert.ok(iAssess > -1 && iContext > -1, 'both sections present');
   assert.ok(iAssess < iContext, 'assessment must come before the context section');
 });
+
+test('render: report ships in Basic mode with advanced sections gated', () => {
+  const html = render(detail, TEMPLATE);
+  assert.match(html, /<body class="basic">/);                 // server-rendered Basic
+  assert.match(html, /<section id="thinking" class="adv">/);  // Reasoning is advanced
+  assert.match(html, /<div class="trio adv"/);                // by skill/model/subagents advanced
+  assert.match(html, /id="adv-toggle"[^>]*aria-expanded="false"/); // toggle present, collapsed
+  assert.match(html, />Show advanced</);                      // default button label
+  assert.match(html, /body\.basic \.adv\s*\{\s*display:none/); // the gating CSS rule exists
+});
+
+test('render: advanced toc links are gated, basic ones are not', () => {
+  const html = render(detail, TEMPLATE);
+  // an advanced jump-link (Reasoning) carries .adv; a basic one (Where it went) does not
+  assert.match(html, /<a class="adv" href="#thinking">/);
+  assert.match(html, /<a href="#where">Where it went<\/a>/);
+});

@@ -133,6 +133,17 @@
   .toc a:hover { color:var(--red); }
   .toc a:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
 
+  /* Basic/Advanced disclosure: the report ships Basic (body.basic) and the toggle
+     reveals .adv blocks. Printing always shows everything. */
+  body.basic .adv { display:none; }
+  body.basic .toc a.adv { display:none; }
+  .toc-adv { margin-left:auto; font-family:var(--font-head); font-size:15px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.03em; color:var(--link); background:var(--canvas);
+    border:1px solid var(--frame); box-shadow:2px 2px 0 #000; padding:4px 12px; cursor:pointer; }
+  .toc-adv:hover { color:var(--red); }
+  .toc-adv:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
+  @media print { body.basic .adv { display:revert; } .toc-adv { display:none; } }
+
   /* Metric "ribbon cards": white Helvetica title bar + flat tinted body block. */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px;
     margin:22px 0 26px; }
@@ -304,7 +315,7 @@
   }
 </style>
 </head>
-<body>
+<body class="basic">
 <div class="frame">
   <header class="banner">
     <div class="banner-main">
@@ -322,15 +333,17 @@
   {{RATING_BADGE}}
   <nav class="toc" aria-label="Report sections">
     <span class="toc-cost">{{TOTAL_COST}}</span>
+    <a href="#assessment">Spend less</a>
     <a href="#context">Context</a>
     <a href="#where">Where it went</a>
-    <a href="#consumers">Consumers</a>
-    <a href="#thinking">Thinking</a>
-    <a href="#skill">Skills</a>
-    <a href="#model">Models</a>
+    <a href="#consumers">What filled it</a>
     <a href="#turns">Top turns</a>
-    <a href="#subagents">Subagents</a>
-    <a href="#tips">Spend less</a>
+    <a class="adv" href="#thinking">Reasoning</a>
+    <a class="adv" href="#skill">Skills</a>
+    <a class="adv" href="#model">Models</a>
+    <a class="adv" href="#subagents">Subagents</a>
+    <button type="button" id="adv-toggle" class="toc-adv" aria-expanded="false"
+      aria-controls="thinking reference">Show advanced</button>
   </nav>
 
   <div class="cards">
@@ -454,7 +467,7 @@
   <tbody>{{CONSUMER_ROWS}}</tbody></table>
   <p class="note">{{CONSUMERS_NOTE}}</p>
 
-  <section id="thinking">
+  <section id="thinking" class="adv">
   <h2 class="think">Reasoning: what it cost</h2>
   <p class="explain">Before most replies and tool actions, the model thinks privately. That thinking
   is charged at the output rate, the most expensive rate, but the text is never saved anywhere, so
@@ -478,7 +491,7 @@
   <tbody>{{THINKING_STEP_ROWS}}</tbody></table>
   </section>
 
-  <div class="trio">
+  <div class="trio adv" id="reference">
     <section>
       <h2 id="skill" class="tint-lime">By skill</h2>
       <p class="explain">What each skill you used cost, counting only the steps the skill's own
@@ -722,6 +735,27 @@
   }
 
   Array.prototype.forEach.call(document.querySelectorAll('table'), enhance);
+})();
+
+// Basic/Advanced disclosure. The report is server-rendered in Basic (body.basic);
+// this restores the reader's last choice from localStorage and wires the toggle.
+(function () {
+  var body = document.body, btn = document.getElementById('adv-toggle');
+  if (!btn) return;
+  var KEY = 'ccm-show-advanced';
+  function apply(show) {
+    body.classList.toggle('basic', !show);
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    btn.textContent = show ? 'Hide advanced' : 'Show advanced';
+  }
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* storage blocked — stay Basic */ }
+  if (saved === '1') apply(true);
+  btn.addEventListener('click', function () {
+    var show = body.classList.contains('basic'); // currently Basic → about to reveal
+    apply(show);
+    try { localStorage.setItem(KEY, show ? '1' : '0'); } catch (e) { /* ignore */ }
+  });
 })();
 </script>
 </body>
