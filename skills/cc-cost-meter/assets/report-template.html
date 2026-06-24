@@ -130,18 +130,15 @@
   .toc .toc-cost { font-family:var(--font-head); font-weight:700; font-size:20px; color:var(--ink);
     margin-right:8px; }
   .toc a { font-family:var(--font-head); font-size:16px; color:var(--link); text-decoration:underline; }
-  .toc a:hover { color:var(--red); }
-  .toc a:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
+  .toc a:hover, .toc-adv:hover { color:var(--red); }
+  .toc a:focus-visible, .toc-adv:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
 
   /* Basic/Advanced disclosure: the report ships Basic (body.basic) and the toggle
      reveals .adv blocks. Printing always shows everything. */
   body.basic .adv { display:none; }
-  body.basic .toc a.adv { display:none; }
   .toc-adv { margin-left:auto; font-family:var(--font-head); font-size:15px; font-weight:700;
     text-transform:uppercase; letter-spacing:.03em; color:var(--link); background:var(--canvas);
     border:1px solid var(--frame); box-shadow:2px 2px 0 #000; padding:4px 12px; cursor:pointer; }
-  .toc-adv:hover { color:var(--red); }
-  .toc-adv:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
   @media print { body.basic .adv { display:revert; } .toc-adv { display:none; } }
 
   /* Metric "ribbon cards": white Helvetica title bar + flat tinted body block. */
@@ -745,10 +742,10 @@
   var KEY = 'ccm-show-advanced';
   function apply(show) {
     body.classList.toggle('basic', !show);
-    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    btn.setAttribute('aria-expanded', show); // setAttribute coerces the boolean → "true"/"false"
     btn.textContent = show ? 'Hide advanced' : 'Show advanced';
   }
-  var saved = null;
+  var saved;
   try { saved = localStorage.getItem(KEY); } catch (e) { /* storage blocked — stay Basic */ }
   if (saved === '1') apply(true);
   btn.addEventListener('click', function () {
