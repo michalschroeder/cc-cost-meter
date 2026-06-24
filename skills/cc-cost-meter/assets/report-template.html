@@ -454,7 +454,8 @@
   <tbody>{{CONSUMER_ROWS}}</tbody></table>
   <p class="note">{{CONSUMERS_NOTE}}</p>
 
-  <h2 id="thinking" class="think">Thinking: what the reasoning cost</h2>
+  <section id="thinking">
+  <h2 class="think">Reasoning: what it cost</h2>
   <p class="explain">Before most replies and tool actions, the model thinks privately. That thinking
   is charged at the output rate, the most expensive rate, but the text is never saved anywhere, so
   no tool can show it to you. The <strong>interleaved</strong> figure is exactly that hidden
@@ -466,8 +467,7 @@
   <p class="note">{{THINKING_SUMMARY}}</p>
   <table id="thinking-turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">tokens</th><th scope="col">share</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col">prompt that drove the reasoning</th></tr></thead>
   <tbody>{{THINKING_TURN_ROWS}}</tbody></table>
-
-  <h2 class="think">Biggest reasoning bursts</h2>
+  <h3>Biggest reasoning bursts</h3>
   <p class="explain">The individual steps where the model thought the hardest.
   <strong>trigger</strong> is what had just landed in the conversation, the tool result or message
   it was reacting to. <strong>next action</strong> is what it decided to do next. A big burst right
@@ -476,6 +476,7 @@
   same answer over and over, a sign that loop would have been better handed to a helper.</p>
   <table data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">tokens</th><th scope="col" class="num" data-sort="num">step</th><th scope="col">trigger (what landed in context right before)</th><th scope="col">next action</th></tr></thead>
   <tbody>{{THINKING_STEP_ROWS}}</tbody></table>
+  </section>
 
   <div class="trio">
     <section>

@@ -432,6 +432,16 @@ test('render: consumers merged — by-tool tally and per-item table share one se
   assert.ok(iConsumers < iByTool && iByTool < iItemTable, 'by-tool tally sits between the consumers heading and the per-item table');
 });
 
+test('render: thinking merged — one Reasoning h2, bursts demoted to h3', () => {
+  const html = render(detail, TEMPLATE);
+  // only one h2 carries the "think" tint now (the bursts h2 became an h3)
+  assert.strictEqual((html.match(/<h2[^>]*class="think"/g) || []).length, 1);
+  assert.match(html, /<h3>Biggest reasoning bursts<\/h3>/);
+  // both tables still render
+  assert.match(html, /id="thinking-turns-table"/);
+  assert.match(html, /Bash: docker compose run &lt;tests&gt;/); // burst trigger still present
+});
+
 test('render: verdict section renders before the context chart (payoff first)', () => {
   const html = render(detail, TEMPLATE);
   const iAssess = html.indexOf('id="assessment"');
