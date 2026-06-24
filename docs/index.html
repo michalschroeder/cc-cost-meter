@@ -174,14 +174,12 @@
     margin:0 0 18px; }
   .explain strong { color:var(--ink); font-weight:bold; }
 
-  /* Side-by-side section grids: .pair (two wide panels) and .trio (three compact
-     panels) share the scaffold, differing only in the minmax floor via --minw. */
-  .pair, .trio { display:grid; grid-template-columns:repeat(auto-fit,minmax(var(--minw,300px),1fr));
+  /* Side-by-side section grid: three compact panels that auto-fit into columns. */
+  .trio { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
     gap:0 40px; align-items:start; }
-  .pair { --minw:440px; }
-  .pair > section, .trio section { min-width:0; }
-  .pair > section table, .trio table { max-width:none; }
-  .pair h2, .trio h2 { margin-top:24px; }
+  .trio section { min-width:0; }
+  .trio table { max-width:none; }
+  .trio h2 { margin-top:24px; }
   @media (max-width:760px) { .trio { grid-template-columns:1fr; } }
 
   /* Session grade badge — colored score block + word + 5-pip meter, sits at the very top. */
@@ -311,6 +309,7 @@
     h2 { break-after:avoid; } table { break-inside:auto; } tr { break-inside:avoid; }
   }
 </style>
+<noscript><style>body.basic .adv { display:revert; }</style></noscript>
 </head>
 <body class="basic">
 <div class="frame">
@@ -338,12 +337,12 @@
     <a href="#where">Where it went</a>
     <a href="#consumers">What filled it</a>
     <a href="#turns">Top turns</a>
-    <a class="adv" href="#thinking">Reasoning</a>
-    <a class="adv" href="#skill">Skills</a>
-    <a class="adv" href="#model">Models</a>
-    <a class="adv" href="#subagents">Subagents</a>
+    <a id="toc-thinking" class="adv" href="#thinking">Reasoning</a>
+    <a id="toc-skill" class="adv" href="#skill">Skills</a>
+    <a id="toc-model" class="adv" href="#model">Models</a>
+    <a id="toc-subagents" class="adv" href="#subagents">Subagents</a>
     <button type="button" id="adv-toggle" class="toc-adv" aria-expanded="false"
-      aria-controls="thinking reference">Show advanced</button>
+      aria-controls="thinking reference toc-thinking toc-skill toc-model toc-subagents">Show advanced</button>
   </nav>
 
   <div class="cards">

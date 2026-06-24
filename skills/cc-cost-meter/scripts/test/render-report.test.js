@@ -469,11 +469,13 @@ test('render: report ships in Basic mode with advanced sections gated', () => {
   assert.match(html, /id="adv-toggle"[^>]*aria-expanded="false"/); // toggle present, collapsed
   assert.match(html, />Show advanced</);                      // default button label
   assert.match(html, /body\.basic \.adv\s*\{\s*display:none/); // the gating CSS rule exists
+  // no-JS fallback: a <noscript> style un-hides .adv so JS-disabled readers keep every section
+  assert.match(html, /<noscript><style>body\.basic \.adv\s*\{\s*display:revert/);
 });
 
 test('render: advanced toc links are gated, basic ones are not', () => {
   const html = render(detail, TEMPLATE);
   // an advanced jump-link (Reasoning) carries .adv; a basic one (Where it went) does not
-  assert.match(html, /<a class="adv" href="#thinking">/);
+  assert.match(html, /<a id="toc-thinking" class="adv" href="#thinking">/);
   assert.match(html, /<a href="#where">Where it went<\/a>/);
 });
