@@ -412,6 +412,17 @@ test('formatting helpers', () => {
   assert.strictEqual(duration(5 * 1000), '5s');
 });
 
+test('render: consumers merged — by-tool tally and per-item table share one section', () => {
+  const html = render(detail, TEMPLATE);
+  // exactly one "what filled the context" heading (the separate by-tool h2 is gone)
+  assert.strictEqual((html.match(/id="consumers"/g) || []).length, 1);
+  // both the by-tool rollup (Read/Bash with result counts) and the per-item table render
+  assert.match(html, /<tbody>[\s\S]*Read[\s\S]*Bash[\s\S]*<\/tbody>/); // by-tool rows
+  assert.match(html, /id="consumers-table"/);                          // per-item table id kept
+  // "Where it went" is now its own full-width section, not paired with by-tool
+  assert.match(html, /id="where"/);
+});
+
 test('render: verdict section renders before the context chart (payoff first)', () => {
   const html = render(detail, TEMPLATE);
   const iAssess = html.indexOf('id="assessment"');
