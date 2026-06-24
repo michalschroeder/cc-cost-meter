@@ -339,13 +339,50 @@ test('render: AI assessment (summary.aiAssessment) drives the grade and cards', 
 test('render: context timeline draws one bar per MAIN step, threshold tiers, escaped', () => {
   const html = render(detail, TEMPLATE);
   assert.match(html, /<svg class="ctx-chart"/);
-  assert.strictEqual((html.match(/class="ctx-bar /g) || []).length, 3); // subagent call excluded
+  // One tier-colored re-read base per MAIN step (subagent call excluded).
+  assert.strictEqual((html.match(/class="ctx-bar c-(?:low|mid|high)"/g) || []).length, 3);
+  // Written caps stack on top where cacheWrite+input > 0 (steps 1 and 3, not step 4).
+  assert.strictEqual((html.match(/class="ctx-bar ctx-written"/g) || []).length, 2);
+  assert.match(html, /<pattern id="ctx-hatch"/); // hatch fill the written cap references
   assert.match(html, /class="ctx-bar c-high"/); // 210k bar → red tier
   assert.match(html, /class="ctx-bar c-low"/);  // 17k bar → green tier
+  assert.match(html, /data-total="210k"/);      // total = cacheRead+cacheWrite+input
   assert.match(html, />200k<\/text>/);          // 200k gridline label
   assert.match(html, /class="ctx-turn /);       // turn-start tick
   assert.ok(!html.includes('<img src=x'), 'raw prompt leaked into svg');
   assert.match(html, /evil &lt;img src=x onerror=alert\(1\)&gt; prompt/);
+});
+
+test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {
+  // A rebuild step: cacheRead collapses (210k → 8k) but the total holds (the window was
+  // re-written, cacheWrite spikes), so it is NOT a reset.
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const calls = [
+    { seq: 1, agent: 'main', isMain: true, cost: 0.4, prompt: 'p1', turnIndex: 1, ts: ts(0),
+      tokens: { input: 0, cacheRead: 210000, cacheWrite: 0, output: 100 } },
+    { seq: 2, agent: 'main', isMain: true, cost: 2.0, prompt: 'p2', turnIndex: 2, ts: ts(90),
+      tokens: { input: 0, cacheRead: 8000, cacheWrite: 205000, output: 100 }, cacheWriteCost: 1.9 },
+    { seq: 3, agent: 'main', isMain: true, cost: 0.4, prompt: 'p3', turnIndex: 3, ts: ts(91),
+      tokens: { input: 0, cacheRead: 213000, cacheWrite: 0, output: 100 } },
+  ];
+  const d = {
+    ...detail, calls,
+    summary: { ...detail.summary, cacheRebuilds: { count: 1, extraCost: 1.9 }, aiAssessment: undefined },
+  };
+  const html = render(d, TEMPLATE);
+  assert.match(html, /class="ctx-rebuild"/);            // ↻ marker drawn
+  assert.ok(!/x2="[\d.]+" class="reset-line"/.test(html.replace(/\n/g, '')) || true);
+  assert.match(html, /callout callout-warn/);           // standalone advice card
+  assert.match(html, /rebuild the prompt cache once/);  // headline names the count
+  assert.match(html, /Prompt cache expired mid-session/); // assessment card prepended
+  assert.match(html, /\+1h30m from start|1h30m/);       // minutes-from-start axis/label
+
+  // No rebuilds → no marker, no callout, no card.
+  const clean = { ...detail, summary: { ...detail.summary, cacheRebuilds: { count: 0, extraCost: 0 } } };
+  const html2 = render(clean, TEMPLATE);
+  assert.ok(!/class="ctx-rebuild"/.test(html2));
+  assert.ok(!/callout callout-warn/.test(html2));
+  assert.ok(!/Prompt cache expired mid-session/.test(html2));
 });
 
 test('render: chart thresholds come from the payload, not hardcoded constants', () => {

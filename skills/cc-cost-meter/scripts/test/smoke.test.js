@@ -64,9 +64,10 @@ test('smoke: detail payload exposes the precomputed summary rollups', async () =
   const out = await runJson(['smoke002'], cfg);
   assert.strictEqual(out.session, 'smoke002');
   assert.ok(out.totalCost > 0);
-  for (const k of ['contextGrowth', 'byTurnKind', 'toolTally', 'highContextCost', 'contextResets', 'contextConsumers', 'assistantOutput', 'bySkill']) {
+  for (const k of ['contextGrowth', 'byTurnKind', 'toolTally', 'highContextCost', 'contextResets', 'cacheRebuilds', 'contextConsumers', 'assistantOutput', 'bySkill']) {
     assert.ok(k in out.summary, `summary.${k} present`);
   }
+  assert.ok('count' in out.summary.cacheRebuilds && 'extraCost' in out.summary.cacheRebuilds);
 });
 
 // A subagent's byAgent label prefers its meta.json `description` (the Task tool's
