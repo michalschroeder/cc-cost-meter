@@ -133,6 +133,17 @@
   .toc a:hover { color:var(--red); }
   .toc a:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
 
+  /* Basic/Advanced disclosure: the report ships Basic (body.basic) and the toggle
+     reveals .adv blocks. Printing always shows everything. */
+  body.basic .adv { display:none; }
+  body.basic .toc a.adv { display:none; }
+  .toc-adv { margin-left:auto; font-family:var(--font-head); font-size:15px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.03em; color:var(--link); background:var(--canvas);
+    border:1px solid var(--frame); box-shadow:2px 2px 0 #000; padding:4px 12px; cursor:pointer; }
+  .toc-adv:hover { color:var(--red); }
+  .toc-adv:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
+  @media print { body.basic .adv { display:revert; } .toc-adv { display:none; } }
+
   /* Metric "ribbon cards": white Helvetica title bar + flat tinted body block. */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px;
     margin:22px 0 26px; }
@@ -304,7 +315,7 @@
   }
 </style>
 </head>
-<body>
+<body class="basic">
 <div class="frame">
   <header class="banner">
     <div class="banner-main">
@@ -325,15 +336,17 @@
       <div class="grade-pips"><span class="pip on"></span><span class="pip on"></span><span class="pip on"></span><span class="pip"></span><span class="pip"></span></div><div class="grade-line">Solid delegation up front, but the context ran hot through a long red/green test loop at the end.</div></div></div>
   <nav class="toc" aria-label="Report sections">
     <span class="toc-cost">$3.18</span>
+    <a href="#assessment">Spend less</a>
     <a href="#context">Context</a>
     <a href="#where">Where it went</a>
-    <a href="#consumers">Consumers</a>
-    <a href="#thinking">Thinking</a>
-    <a href="#skill">Skills</a>
-    <a href="#model">Models</a>
+    <a href="#consumers">What filled it</a>
     <a href="#turns">Top turns</a>
-    <a href="#subagents">Subagents</a>
-    <a href="#tips">Spend less</a>
+    <a class="adv" href="#thinking">Reasoning</a>
+    <a class="adv" href="#skill">Skills</a>
+    <a class="adv" href="#model">Models</a>
+    <a class="adv" href="#subagents">Subagents</a>
+    <button type="button" id="adv-toggle" class="toc-adv" aria-expanded="false"
+      aria-controls="thinking reference">Show advanced</button>
   </nav>
 
   <div class="cards">
@@ -364,6 +377,23 @@
     below answers one question about this session, and the note under each heading tells you
     how to read it.</p>
   </div>
+
+  <section id="assessment">
+  <h2 class="tint-olive">Spending less next time</h2>
+  <p class="explain">An assessment of this session: where the money went and what to do differently.
+  Read the cards as leads to check, not as final verdicts. The cost of a session is driven mostly by
+  one thing, the size of the context multiplied by the number of steps, because everything left in
+  the conversation is re-read on every later step. That makes keeping the context small, with /compact
+  or a fresh session, almost always the biggest lever. When a card blames a more visible detail, such
+  as a short "do it" prompt or one expensive skill, it is often pointing at <em>where</em> the spend
+  happened rather than the underlying cause: that same prompt would have cost about the same in any
+  large context, because what you paid for was re-reading the window it ran in, not the words you
+  typed. So treat each card as a place to look, confirm it against the tables above, and act on the
+  structural lever (a smaller context) before the cosmetic one (longer prompts).</p>
+  <div class="assess"><div class="acard acard-good"><div class="acard-title">Offloaded the exploration to subagents</div><div class="ablk"><span class="alabel">What</span><span class="atext">Two subagents ($0.22 + $0.19) mapped every caller of the old token helper and drafted the migration in an isolated worktree, so the bulky search output never piled up in the main window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Subagent context is thrown away when they return — only their conclusions came back, so the main session stayed lean while the heavy reading happened elsewhere.</span></div><div class="ablk"><span class="alabel">Keep it up</span><span class="atext">Keep dispatching exploration and codebase-mapping to subagents; it&#39;s the single biggest reason the first half of this session was cheap.</span></div></div>
+<div class="acard acard-bad"><div class="acard-title">The test loop re-read a 214k context every step</div><div class="ablk"><span class="alabel">What</span><span class="atext">The final &#39;fix the failing test&#39; turn climbed to 214k tokens of context and cost $0.93 — over a quarter of the session — across a red/green loop where each npm test run&#39;s full output stayed in the window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Every step re-reads the entire conversation (the cache-read line, $1.43 of the $3.18 total). Once the window is that large, each additional test run is billed against all 214k tokens, not just the new output.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">When a test loop drags on past a few iterations, run /compact to drop the stale earlier output, or ask a subagent to run the failing test and report only pass/fail plus the relevant error — don&#39;t keep full test logs in the main window.</span></div></div>
+<div class="acard acard-warn"><div class="acard-title">Reasoning concentrated on one step</div><div class="ablk"><span class="alabel">What</span><span class="atext">Thinking was 58k tokens / $0.62 of output, and step 11 alone burned 9.8k of it right after a test run.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Big context plus an ambiguous failure makes the model reason longer before acting; that thinking is billed at the output rate and most of it (49k) is interleaved, so it never even shows up in the transcript.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">Give the model a sharper target before a heavy step — paste the exact failing assertion and file rather than &#39;fix the failing test&#39; — so it spends fewer tokens re-deriving what&#39;s wrong.</span></div></div></div>
+  </section>
 
   <h2 id="context" class="tint-olive">Context window over time</h2>
   <p class="explain">One bar per step, left to right in time order. The height of a bar is how
@@ -408,46 +438,41 @@
   </div>
   <div id="grow-readout">hover a block to see what that turn added</div>
 
-  <div class="pair">
-    <section>
-      <h2 id="where" class="tint-sage">Where it went</h2>
-      <p class="explain">Your total cost, split into the four things you actually pay for.
-      <strong>cache read</strong> is the model re-reading the conversation at every step. This is
-      usually the biggest slice, and the main reason long sessions get expensive.
-      <strong>output</strong> is everything the model wrote back, including the private thinking you
-      never see. <strong>cache write</strong> is the cost of saving new material once, so that later
-      steps can re-read it more cheaply. <strong>input</strong> is brand-new text that has not been
-      saved yet, and it is usually tiny.</p>
-      <table><thead><tr><th scope="col" data-sort="text">component</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col">share</th></tr></thead>
-      <tbody><tr><td>cache read</td><td class="num">$1.43</td><td><div class="bar" style="width:45%"></div></td></tr>
+  <section>
+    <h2 id="where" class="tint-sage">Where it went</h2>
+    <p class="explain">Your total cost, split into the four things you actually pay for.
+    <strong>cache read</strong> is the model re-reading the conversation at every step. This is
+    usually the biggest slice, and the main reason long sessions get expensive.
+    <strong>output</strong> is everything the model wrote back, including the private thinking you
+    never see. <strong>cache write</strong> is the cost of saving new material once, so that later
+    steps can re-read it more cheaply. <strong>input</strong> is brand-new text that has not been
+    saved yet, and it is usually tiny.</p>
+    <table><thead><tr><th scope="col" data-sort="text">component</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col">share</th></tr></thead>
+    <tbody><tr><td>cache read</td><td class="num">$1.43</td><td><div class="bar" style="width:45%"></div></td></tr>
 <tr><td>output</td><td class="num">$0.90</td><td><div class="bar" style="width:28%"></div></td></tr>
 <tr><td>cache write</td><td class="num">$0.80</td><td><div class="bar" style="width:25%"></div></td></tr>
 <tr><td>input</td><td class="num">$0.05</td><td><div class="bar" style="width:2%"></div></td></tr></tbody></table>
-    </section>
-    <section>
-      <h2 id="consumers" class="tint-salmon">What filled the context, by tool</h2>
-      <p class="explain">What took up room in the conversation, grouped by where it came from.
-      <strong>carried cost</strong> is the repeat charge for keeping it around: once a file or a
-      command's output lands in the conversation, the model re-reads it at every later step until the
-      session ends or the conversation is cleared. A big row here is a good thing to hand off to a
-      helper (a subagent) next time. The helper reads it in its own separate conversation and sends
-      back only a short summary, so the bulky original never weighs down your main chat.</p>
-      <table><thead><tr><th scope="col" data-sort="text">tool</th><th scope="col" class="num" data-sort="num" data-sum="int">results</th><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col">share</th></tr></thead>
-      <tbody><tr><td>Read</td><td class="num">6</td><td class="num">52k</td><td class="num">$0.78</td><td><div class="bar" style="width:54%"></div></td></tr>
+  </section>
+
+  <h2 id="consumers" class="tint-salmon">What filled the context</h2>
+  <p class="explain">What took up room in the conversation. <strong>carried cost</strong> is the
+  repeat charge for keeping it around: once a file or a command's output lands in the conversation,
+  the model re-reads it at every later step until the session ends or the conversation is cleared. A
+  big row here is a good thing to hand off to a helper (a subagent) next time — the helper reads it in
+  its own separate conversation and sends back only a short summary, so the bulky original never weighs
+  down your main chat.</p>
+  <h3>By tool — where it came from</h3>
+  <table><thead><tr><th scope="col" data-sort="text">tool</th><th scope="col" class="num" data-sort="num" data-sum="int">results</th><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col">share</th></tr></thead>
+  <tbody><tr><td>Read</td><td class="num">6</td><td class="num">52k</td><td class="num">$0.78</td><td><div class="bar" style="width:54%"></div></td></tr>
 <tr><td>Bash</td><td class="num">5</td><td class="num">26k</td><td class="num">$0.34</td><td><div class="bar" style="width:27%"></div></td></tr>
 <tr><td>Grep</td><td class="num">4</td><td class="num">18k</td><td class="num">$0.21</td><td><div class="bar" style="width:19%"></div></td></tr></tbody></table>
-    </section>
-  </div>
-
-  <h2 class="tint-peach">Top context consumers</h2>
-  <p class="explain">The same space again, but broken down item by item: the exact file, command,
-  or message. A <strong>×3</strong> after a tool name means the same thing landed three times. A
-  file that gets read three times costs its full size three times over, plus the repeat charge for
-  keeping each copy around. The <strong>assistant-*</strong> rows are the model's own words: its
-  visible replies (assistant-text), its private thinking (assistant-thinking), and the text it
-  typed into its tools, such as the contents of an edit or a command it ran (assistant-tool-calls).
-  When those rows are near the top, the cost came mostly from how much the model itself wrote, not
-  from what it read.</p>
+  <h3>Item by item — the exact file, command, or message</h3>
+  <p class="explain">A <strong>×3</strong> after a tool name means the same thing landed three times;
+  a file read three times costs its full size three times over, plus the repeat charge for keeping each
+  copy around. The <strong>assistant-*</strong> rows are the model's own words: its visible replies
+  (assistant-text), its private thinking (assistant-thinking), and the text it typed into its tools
+  (assistant-tool-calls). When those rows are near the top, the cost came mostly from how much the
+  model itself wrote, not from what it read.</p>
   <table id="consumers-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col">share</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col" data-sort="text">tool</th><th scope="col">target (file · command · prompt)</th></tr></thead>
   <tbody><tr><td class="num">31k</td><td><div class="bar" style="width:32%"></div></td><td class="num">$0.46</td><td>Read ×3</td><td class="prompt has-tip" data-tip-h="Read target" data-full="/repo/src/auth/token-service.ts">The new token-service module the refactor targets — re-read on every step because the implementation kept referring back to its full surface area.</td></tr>
 <tr><td class="num">22k</td><td><div class="bar" style="width:23%"></div></td><td class="num">$0.29</td><td>Bash ×4</td><td class="prompt has-tip" data-tip-h="Bash target" data-full="npm test -- auth">The auth test-suite run, repeated through the red/green loop — each full run&#39;s output stayed in context and was re-read by later steps.</td></tr>
@@ -455,7 +480,19 @@
 <tr><td class="num">14k</td><td><div class="bar" style="width:15%"></div></td><td class="num">$0.17</td><td>Grep ×4</td><td class="prompt has-tip" data-tip-h="Grep target" data-full="useTokenHelper(">The call-site search for the old helper — four passes as the agent widened the pattern to catch every usage.</td></tr></tbody></table>
   <p class="note">estTokens ≈ chars/4 — estimates, not billed figures.</p>
 
-  <h2 id="thinking" class="think">Thinking: what the reasoning cost</h2>
+  <h2 id="turns" class="tint-salmon">Top turns</h2>
+  <p class="explain">Your messages, ranked by how much the work each one set off ended up costing.
+  <strong>peak ctx</strong> is how full the conversation was while that work was running. The same
+  task costs several times more when the conversation is already large than when it is small, which
+  is why a short message late in a session can cost more than a big one asked at the start.</p>
+  <table id="turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col" data-sort="text">kind</th><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num">peak ctx</th><th scope="col">what</th></tr></thead>
+  <tbody><tr><td class="num">$0.93</td><td>user</td><td></td><td class="num">214k</td><td class="prompt has-tip" data-tip-h="user message" data-full="fix the failing integration test">Pointed the agent at the one red integration test after the refactor and told it to make it pass without touching the new token service.</td></tr>
+<tr><td class="num">$0.54</td><td>subagent-orchestration</td><td></td><td class="num">158k</td><td class="prompt">↩ subagent results</td></tr>
+<tr><td class="num">$0.38</td><td>skill</td><td>test-driven-development</td><td class="num">96k</td><td class="prompt">Ran the test-driven-development skill: wrote the failing token-service tests first, then implemented against them.</td></tr>
+<tr><td class="num">$0.33</td><td>user</td><td></td><td class="num">61k</td><td class="prompt has-tip" data-tip-h="user message" data-full="Refactor the auth module to use the new token service and add tests">Kicked off the work: replace the old in-process token helper with the new token service across the auth module, with test coverage.</td></tr></tbody></table>
+
+  <section id="thinking" class="adv">
+  <h2 class="think">Reasoning: what it cost</h2>
   <p class="explain">Before most replies and tool actions, the model thinks privately. That thinking
   is charged at the output rate, the most expensive rate, but the text is never saved anywhere, so
   no tool can show it to you. The <strong>interleaved</strong> figure is exactly that hidden
@@ -469,8 +506,7 @@
   <tbody><tr><td class="num">24k</td><td><div class="bar" style="width:41%"></div></td><td class="num">4</td><td class="prompt has-tip" data-tip-h="user message" data-full="fix the failing integration test">Pointed the agent at the one red integration test after the refactor and told it to make it pass without touching the new token service.</td></tr>
 <tr><td class="num">19k</td><td><div class="bar" style="width:33%"></div></td><td class="num">3</td><td class="prompt">Ran the test-driven-development skill: wrote the failing token-service tests first, then implemented against them.</td></tr>
 <tr><td class="num">15k</td><td><div class="bar" style="width:26%"></div></td><td class="num">1</td><td class="prompt has-tip" data-tip-h="user message" data-full="Refactor the auth module to use the new token service and add tests">Kicked off the work: replace the old in-process token helper with the new token service across the auth module, with test coverage.</td></tr></tbody></table>
-
-  <h2 class="think">Biggest reasoning bursts</h2>
+  <h3>Biggest reasoning bursts</h3>
   <p class="explain">The individual steps where the model thought the hardest.
   <strong>trigger</strong> is what had just landed in the conversation, the tool result or message
   it was reacting to. <strong>next action</strong> is what it decided to do next. A big burst right
@@ -481,8 +517,9 @@
   <tbody><tr><td class="num">10k</td><td class="num">11</td><td class="prompt">Bash: npm test -- auth</td><td>Edit, Bash</td></tr>
 <tr><td class="num">7k</td><td class="num">9</td><td class="prompt">Read: /repo/src/auth/token-service.ts</td><td>Edit</td></tr>
 <tr><td class="num">6k</td><td class="num">5</td><td class="prompt">user-prompt: wrote the failing tests first</td><td>Write</td></tr></tbody></table>
+  </section>
 
-  <div class="trio">
+  <div class="trio adv" id="reference">
     <section>
       <h2 id="skill" class="tint-lime">By skill</h2>
       <p class="explain">What each skill you used cost, counting only the steps the skill's own
@@ -512,32 +549,6 @@
 <tr><td class="prompt">Draft the migration to the new token service in an isolated worktree</td><td class="num">$0.19</td></tr></tbody></table>
     </section>
   </div>
-
-  <h2 id="turns" class="tint-salmon">Top turns</h2>
-  <p class="explain">Your messages, ranked by how much the work each one set off ended up costing.
-  <strong>peak ctx</strong> is how full the conversation was while that work was running. The same
-  task costs several times more when the conversation is already large than when it is small, which
-  is why a short message late in a session can cost more than a big one asked at the start.</p>
-  <table id="turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col" data-sort="text">kind</th><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num">peak ctx</th><th scope="col">what</th></tr></thead>
-  <tbody><tr><td class="num">$0.93</td><td>user</td><td></td><td class="num">214k</td><td class="prompt has-tip" data-tip-h="user message" data-full="fix the failing integration test">Pointed the agent at the one red integration test after the refactor and told it to make it pass without touching the new token service.</td></tr>
-<tr><td class="num">$0.54</td><td>subagent-orchestration</td><td></td><td class="num">158k</td><td class="prompt">↩ subagent results</td></tr>
-<tr><td class="num">$0.38</td><td>skill</td><td>test-driven-development</td><td class="num">96k</td><td class="prompt">Ran the test-driven-development skill: wrote the failing token-service tests first, then implemented against them.</td></tr>
-<tr><td class="num">$0.33</td><td>user</td><td></td><td class="num">61k</td><td class="prompt has-tip" data-tip-h="user message" data-full="Refactor the auth module to use the new token service and add tests">Kicked off the work: replace the old in-process token helper with the new token service across the auth module, with test coverage.</td></tr></tbody></table>
-
-  <h2 id="tips" class="tint-olive">Spending less next time</h2>
-  <p class="explain">An assessment of this session: where the money went and what to do differently.
-  Read the cards as leads to check, not as final verdicts. The cost of a session is driven mostly by
-  one thing, the size of the context multiplied by the number of steps, because everything left in
-  the conversation is re-read on every later step. That makes keeping the context small, with /compact
-  or a fresh session, almost always the biggest lever. When a card blames a more visible detail, such
-  as a short "do it" prompt or one expensive skill, it is often pointing at <em>where</em> the spend
-  happened rather than the underlying cause: that same prompt would have cost about the same in any
-  large context, because what you paid for was re-reading the window it ran in, not the words you
-  typed. So treat each card as a place to look, confirm it against the tables above, and act on the
-  structural lever (a smaller context) before the cosmetic one (longer prompts).</p>
-  <div class="assess"><div class="acard acard-good"><div class="acard-title">Offloaded the exploration to subagents</div><div class="ablk"><span class="alabel">What</span><span class="atext">Two subagents ($0.22 + $0.19) mapped every caller of the old token helper and drafted the migration in an isolated worktree, so the bulky search output never piled up in the main window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Subagent context is thrown away when they return — only their conclusions came back, so the main session stayed lean while the heavy reading happened elsewhere.</span></div><div class="ablk"><span class="alabel">Keep it up</span><span class="atext">Keep dispatching exploration and codebase-mapping to subagents; it&#39;s the single biggest reason the first half of this session was cheap.</span></div></div>
-<div class="acard acard-bad"><div class="acard-title">The test loop re-read a 214k context every step</div><div class="ablk"><span class="alabel">What</span><span class="atext">The final &#39;fix the failing test&#39; turn climbed to 214k tokens of context and cost $0.93 — over a quarter of the session — across a red/green loop where each npm test run&#39;s full output stayed in the window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Every step re-reads the entire conversation (the cache-read line, $1.43 of the $3.18 total). Once the window is that large, each additional test run is billed against all 214k tokens, not just the new output.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">When a test loop drags on past a few iterations, run /compact to drop the stale earlier output, or ask a subagent to run the failing test and report only pass/fail plus the relevant error — don&#39;t keep full test logs in the main window.</span></div></div>
-<div class="acard acard-warn"><div class="acard-title">Reasoning concentrated on one step</div><div class="ablk"><span class="alabel">What</span><span class="atext">Thinking was 58k tokens / $0.62 of output, and step 11 alone burned 9.8k of it right after a test run.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Big context plus an ambiguous failure makes the model reason longer before acting; that thinking is billed at the output rate and most of it (49k) is interleaved, so it never even shows up in the transcript.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">Give the model a sharper target before a heavy step — paste the exact failing assertion and file rather than &#39;fix the failing test&#39; — so it spends fewer tokens re-deriving what&#39;s wrong.</span></div></div></div>
 
   <footer>Costs are calculated from the raw token counts using public LiteLLM prices, not the
   figure Claude reports. Numbers marked "est" are estimates (about 4 characters per token). The
@@ -745,6 +756,27 @@
   }
 
   Array.prototype.forEach.call(document.querySelectorAll('table'), enhance);
+})();
+
+// Basic/Advanced disclosure. The report is server-rendered in Basic (body.basic);
+// this restores the reader's last choice from localStorage and wires the toggle.
+(function () {
+  var body = document.body, btn = document.getElementById('adv-toggle');
+  if (!btn) return;
+  var KEY = 'ccm-show-advanced';
+  function apply(show) {
+    body.classList.toggle('basic', !show);
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    btn.textContent = show ? 'Hide advanced' : 'Show advanced';
+  }
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* storage blocked — stay Basic */ }
+  if (saved === '1') apply(true);
+  btn.addEventListener('click', function () {
+    var show = body.classList.contains('basic'); // currently Basic → about to reveal
+    apply(show);
+    try { localStorage.setItem(KEY, show ? '1' : '0'); } catch (e) { /* ignore */ }
+  });
 })();
 </script>
 </body>
