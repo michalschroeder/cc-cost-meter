@@ -280,8 +280,9 @@ test('render: payload without assistantOutput → placeholder, no crash', () => 
   assert.ok(!/\{\{[A-Z_]+\}\}/.test(html));
 });
 
-// Everything between the assessment grid and the footer (the .acard panels live here).
-const assessOf = (html) => (html.split('class="assess"')[1] || '').split('<footer')[0];
+// The assessment <section id="assessment"> body — bounded by its own wrapper so the
+// helper is position-independent (the section now sits near the top, not before <footer>).
+const assessOf = (html) => (html.split('id="assessment"')[1] || '').split('</section>')[0];
 
 test('render: no aiAssessment → assessment section renders empty, no grade badge', () => {
   // The assessment is always AI-written; a payload with no summary.aiAssessment (e.g. a raw
@@ -409,4 +410,12 @@ test('formatting helpers', () => {
   assert.strictEqual(duration(3 * 3600 * 1000 + 25 * 60 * 1000), '3h 25m');
   assert.strictEqual(duration(90 * 1000), '2m');
   assert.strictEqual(duration(5 * 1000), '5s');
+});
+
+test('render: verdict section renders before the context chart (payoff first)', () => {
+  const html = render(detail, TEMPLATE);
+  const iAssess = html.indexOf('id="assessment"');
+  const iContext = html.indexOf('id="context"');
+  assert.ok(iAssess > -1 && iContext > -1, 'both sections present');
+  assert.ok(iAssess < iContext, 'assessment must come before the context section');
 });
