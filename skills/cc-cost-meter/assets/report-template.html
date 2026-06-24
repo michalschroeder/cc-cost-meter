@@ -467,6 +467,14 @@
   <tbody>{{CONSUMER_ROWS}}</tbody></table>
   <p class="note">{{CONSUMERS_NOTE}}</p>
 
+  <h2 id="turns" class="tint-salmon">Top turns</h2>
+  <p class="explain">Your messages, ranked by how much the work each one set off ended up costing.
+  <strong>peak ctx</strong> is how full the conversation was while that work was running. The same
+  task costs several times more when the conversation is already large than when it is small, which
+  is why a short message late in a session can cost more than a big one asked at the start.</p>
+  <table id="turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col" data-sort="text">kind</th><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num">peak ctx</th><th scope="col">what</th></tr></thead>
+  <tbody>{{TOP_TURNS_ROWS}}</tbody></table>
+
   <section id="thinking" class="adv">
   <h2 class="think">Reasoning: what it cost</h2>
   <p class="explain">Before most replies and tool actions, the model thinks privately. That thinking
@@ -520,14 +528,6 @@
       <tbody>{{SUBAGENT_ROWS}}</tbody></table>
     </section>
   </div>
-
-  <h2 id="turns" class="tint-salmon">Top turns</h2>
-  <p class="explain">Your messages, ranked by how much the work each one set off ended up costing.
-  <strong>peak ctx</strong> is how full the conversation was while that work was running. The same
-  task costs several times more when the conversation is already large than when it is small, which
-  is why a short message late in a session can cost more than a big one asked at the start.</p>
-  <table id="turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col" data-sort="text">kind</th><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num">peak ctx</th><th scope="col">what</th></tr></thead>
-  <tbody>{{TOP_TURNS_ROWS}}</tbody></table>
 
   <footer>Costs are calculated from the raw token counts using public LiteLLM prices, not the
   figure Claude reports. Numbers marked "est" are estimates (about 4 characters per token). The

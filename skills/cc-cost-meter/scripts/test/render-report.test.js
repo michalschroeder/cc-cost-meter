@@ -401,6 +401,17 @@ test('mock fixture renders a complete report (no unfilled slots, grade + summari
   assert.match(html, /test-driven-development/);            // by-skill row
 });
 
+test('render: Top turns (Basic) renders before the advanced Reasoning/trio sections', () => {
+  const html = render(detail, TEMPLATE);
+  const iTurns = html.indexOf('id="turns"');
+  const iThinking = html.indexOf('id="thinking"');
+  const iReference = html.indexOf('id="reference"');
+  assert.ok(iTurns > -1 && iThinking > -1 && iReference > -1, 'all three present');
+  assert.ok(iTurns < iThinking && iTurns < iReference, 'Top turns must precede the advanced sections');
+  // Top turns stays Basic (not gated): its heading is not inside an adv container
+  assert.ok(!/<h2 id="turns"[^>]*class="[^"]*adv/.test(html), 'Top turns must not be advanced');
+});
+
 test('formatting helpers', () => {
   assert.strictEqual(money(4.5287), '$4.53');
   assert.strictEqual(money(0.0021), '$0.0021'); // sub-cent stays informative
