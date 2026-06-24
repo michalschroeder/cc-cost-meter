@@ -414,13 +414,22 @@ test('formatting helpers', () => {
 
 test('render: consumers merged — by-tool tally and per-item table share one section', () => {
   const html = render(detail, TEMPLATE);
-  // exactly one "what filled the context" heading (the separate by-tool h2 is gone)
-  assert.strictEqual((html.match(/id="consumers"/g) || []).length, 1);
   // both the by-tool rollup (Read/Bash with result counts) and the per-item table render
   assert.match(html, /<tbody>[\s\S]*Read[\s\S]*Bash[\s\S]*<\/tbody>/); // by-tool rows
   assert.match(html, /id="consumers-table"/);                          // per-item table id kept
   // "Where it went" is now its own full-width section, not paired with by-tool
   assert.match(html, /id="where"/);
+
+  // Discriminating checks — these FAIL on the old paired two-section layout:
+  // 1. The consumers heading is an <h2>, not a bare <section> wrapper
+  assert.match(html, /<h2 id="consumers"/);
+  // 2. The old .pair wrapper is gone (it only ever wrapped the where/by-tool pair)
+  assert.ok(!html.includes('class="pair"'), 'the where/by-tool .pair wrapper must be gone');
+  // 3. By-tool tally sits between the consumers heading and the per-item table
+  const iConsumers = html.indexOf('id="consumers"');
+  const iByTool = html.indexOf('By tool — where it came from');
+  const iItemTable = html.indexOf('id="consumers-table"');
+  assert.ok(iConsumers < iByTool && iByTool < iItemTable, 'by-tool tally sits between the consumers heading and the per-item table');
 });
 
 test('render: verdict section renders before the context chart (payoff first)', () => {
