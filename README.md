@@ -60,8 +60,6 @@ cp -r skills/cc-cost-meter ~/.claude/skills/        # or a project's .agents/ski
     demo payload behind the [sample report](https://michalschroeder.github.io/cc-cost-meter/)
     (`node scripts/render-report.js --mock --out ../../docs/index.html` to regenerate it).
   - `REFERENCE.md` / `DESIGN.md` — the cost model and design notes.
-  - `SYNC.md` — how the cost engine is vendored from
-    [claude-statusline](https://github.com/michalschroeder/claude-statusline).
 
 ## Tests
 

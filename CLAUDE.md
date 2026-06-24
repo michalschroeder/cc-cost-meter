@@ -64,14 +64,6 @@ The cost math is the substance. Key modules:
 the honest numbers; raw re-aggregation over-counts tools ~3× and invents false growth. This is a
 documented trap (see `SKILL.md` step 3).
 
-## Vendoring — important
-
-`scripts/lib/*.js` and `data/model_prices.json` are a **vendored copy** of the cost engine from
-the canonical [claude-statusline](https://github.com/michalschroeder/claude-statusline) repo.
-Do not treat them as original source. To change cost logic, change it upstream and re-sync per
-**`skills/cc-cost-meter/SYNC.md`**. The one intentional local delta: in `lib/pricing.js` the
-`BUNDLED` path is `__dirname/../../data` (data sits at the skill root). Re-apply after any re-copy.
-
 ## Reference docs
 
 - `skills/cc-cost-meter/SKILL.md` — the skill definition and full workflow (start here for behavior).

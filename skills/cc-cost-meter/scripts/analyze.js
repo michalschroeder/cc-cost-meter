@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// JSON-only session cost analyzer. A trim of the repo's bin/sessions.js with all
-// human rendering removed: emits the LIST payload (no prefix / `list`) or the
-// full-fidelity DETAIL payload (with an id-prefix). Self-contained — vendored libs
-// live in ./lib, the price snapshot in ../data. See SYNC.md for the canonical source.
+// JSON-only session cost analyzer: emits the LIST payload (no prefix / `list`) or the
+// full-fidelity DETAIL payload (with an id-prefix). Self-contained — the cost
+// engine lives in ./lib, the price snapshot in ../data.
 const path = require('path');
 const os = require('os');
 const { readTitleRecap, projectDirs, listSessions, listSubagentTranscripts } = require('./lib/transcript');
