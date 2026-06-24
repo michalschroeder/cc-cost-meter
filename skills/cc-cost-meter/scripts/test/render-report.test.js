@@ -280,8 +280,9 @@ test('render: payload without assistantOutput → placeholder, no crash', () => 
   assert.ok(!/\{\{[A-Z_]+\}\}/.test(html));
 });
 
-// Everything between the assessment grid and the footer (the .acard panels live here).
-const assessOf = (html) => (html.split('class="assess"')[1] || '').split('<footer')[0];
+// The assessment <section id="assessment"> body — bounded by its own wrapper so the
+// helper is position-independent (the section now sits near the top, not before <footer>).
+const assessOf = (html) => (html.split('id="assessment"')[1] || '').split('</section>')[0];
 
 test('render: no aiAssessment → assessment section renders empty, no grade badge', () => {
   // The assessment is always AI-written; a payload with no summary.aiAssessment (e.g. a raw
@@ -400,6 +401,17 @@ test('mock fixture renders a complete report (no unfilled slots, grade + summari
   assert.match(html, /test-driven-development/);            // by-skill row
 });
 
+test('render: Top turns (Basic) renders before the advanced Reasoning/trio sections', () => {
+  const html = render(detail, TEMPLATE);
+  const iTurns = html.indexOf('id="turns"');
+  const iThinking = html.indexOf('id="thinking"');
+  const iReference = html.indexOf('id="reference"');
+  assert.ok(iTurns > -1 && iThinking > -1 && iReference > -1, 'all three present');
+  assert.ok(iTurns < iThinking && iTurns < iReference, 'Top turns must precede the advanced sections');
+  // Top turns stays Basic (not gated): its heading is not inside an adv container
+  assert.ok(!/<h2 id="turns"[^>]*class="[^"]*adv/.test(html), 'Top turns must not be advanced');
+});
+
 test('formatting helpers', () => {
   assert.strictEqual(money(4.5287), '$4.53');
   assert.strictEqual(money(0.0021), '$0.0021'); // sub-cent stays informative
@@ -409,4 +421,61 @@ test('formatting helpers', () => {
   assert.strictEqual(duration(3 * 3600 * 1000 + 25 * 60 * 1000), '3h 25m');
   assert.strictEqual(duration(90 * 1000), '2m');
   assert.strictEqual(duration(5 * 1000), '5s');
+});
+
+test('render: consumers merged — by-tool tally and per-item table share one section', () => {
+  const html = render(detail, TEMPLATE);
+  // both the by-tool rollup (Read/Bash with result counts) and the per-item table render
+  assert.match(html, /<tbody>[\s\S]*Read[\s\S]*Bash[\s\S]*<\/tbody>/); // by-tool rows
+  assert.match(html, /id="consumers-table"/);                          // per-item table id kept
+  // "Where it went" is now its own full-width section, not paired with by-tool
+  assert.match(html, /id="where"/);
+
+  // Discriminating checks — these FAIL on the old paired two-section layout:
+  // 1. The consumers heading is an <h2>, not a bare <section> wrapper
+  assert.match(html, /<h2 id="consumers"/);
+  // 2. The old .pair wrapper is gone (it only ever wrapped the where/by-tool pair)
+  assert.ok(!html.includes('class="pair"'), 'the where/by-tool .pair wrapper must be gone');
+  // 3. By-tool tally sits between the consumers heading and the per-item table
+  const iConsumers = html.indexOf('id="consumers"');
+  const iByTool = html.indexOf('By tool — where it came from');
+  const iItemTable = html.indexOf('id="consumers-table"');
+  assert.ok(iConsumers < iByTool && iByTool < iItemTable, 'by-tool tally sits between the consumers heading and the per-item table');
+});
+
+test('render: thinking merged — one Reasoning h2, bursts demoted to h3', () => {
+  const html = render(detail, TEMPLATE);
+  // only one h2 carries the "think" tint now (the bursts h2 became an h3)
+  assert.strictEqual((html.match(/<h2[^>]*class="think"/g) || []).length, 1);
+  assert.match(html, /<h3>Biggest reasoning bursts<\/h3>/);
+  // both tables still render
+  assert.match(html, /id="thinking-turns-table"/);
+  assert.match(html, /Bash: docker compose run &lt;tests&gt;/); // burst trigger still present
+});
+
+test('render: verdict section renders before the context chart (payoff first)', () => {
+  const html = render(detail, TEMPLATE);
+  const iAssess = html.indexOf('id="assessment"');
+  const iContext = html.indexOf('id="context"');
+  assert.ok(iAssess > -1 && iContext > -1, 'both sections present');
+  assert.ok(iAssess < iContext, 'assessment must come before the context section');
+});
+
+test('render: report ships in Basic mode with advanced sections gated', () => {
+  const html = render(detail, TEMPLATE);
+  assert.match(html, /<body class="basic">/);                 // server-rendered Basic
+  assert.match(html, /<section id="thinking" class="adv">/);  // Reasoning is advanced
+  assert.match(html, /<div class="trio adv"/);                // by skill/model/subagents advanced
+  assert.match(html, /id="adv-toggle"[^>]*aria-expanded="false"/); // toggle present, collapsed
+  assert.match(html, />Show advanced</);                      // default button label
+  assert.match(html, /body\.basic \.adv\s*\{\s*display:none/); // the gating CSS rule exists
+  // no-JS fallback: a <noscript> style un-hides .adv so JS-disabled readers keep every section
+  assert.match(html, /<noscript><style>body\.basic \.adv\s*\{\s*display:revert/);
+});
+
+test('render: advanced toc links are gated, basic ones are not', () => {
+  const html = render(detail, TEMPLATE);
+  // an advanced jump-link (Reasoning) carries .adv; a basic one (Where it went) does not
+  assert.match(html, /<a id="toc-thinking" class="adv" href="#thinking">/);
+  assert.match(html, /<a href="#where">Where it went<\/a>/);
 });
