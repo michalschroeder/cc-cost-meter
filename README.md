@@ -11,6 +11,12 @@ no dependencies, runs offline against a bundled price snapshot.
 **▶ [See a live sample report](https://michalschroeder.github.io/cc-cost-meter/)** — the full
 interactive HTML for a mock session (context timeline, per-turn spend, thinking breakdown, grade).
 
+<p align="center">
+  <a href="https://michalschroeder.github.io/cc-cost-meter/">
+    <img src="docs/assets/sample-report.png" alt="Sample cc-cost-meter report" width="640">
+  </a>
+</p>
+
 ## What it answers
 
 - Why was this session expensive? What was the single biggest lever?
