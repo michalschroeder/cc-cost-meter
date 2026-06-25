@@ -367,14 +367,15 @@ test('render: chart tooltip shows tools ran and context sources, not the prompt'
     ],
   };
   const html = render(payload, TEMPLATE);
-  // SVG data attributes drive the styled tooltip: tally + basename'd sources.
+  // SVG data attributes drive the styled tooltip: tally + classified sources
+  // (path tool → "Read foo.js"; command tool → "Bash: <cmd>").
   assert.match(html, /data-tools="Read ×2 · Bash"/);
-  assert.match(html, /data-source="Read foo.js · Bash git log --stat"/);
+  assert.match(html, /data-source="Read foo.js · Bash: git log --stat"/);
   // Only the first bar has tools; the second (no tools/sources) omits the attrs.
   assert.strictEqual((html.match(/data-tools=/g) || []).length, 1);
   assert.strictEqual((html.match(/data-source=/g) || []).length, 1);
   // Native <title> fallback gained the did/ate suffix.
-  assert.match(html, /— ran Read ×2 · Bash; written ← Read foo.js · Bash git log --stat/);
+  assert.match(html, /— ran Read ×2 · Bash; new in context: Read foo.js · Bash: git log --stat/);
   // The old prompt-echo is gone from the context-timeline bars and the client script.
   // (Scoped to the ctx-chart SVG — the separate growth bar legitimately keeps data-prompt.)
   const chartSvg = (html.split('<svg class="ctx-chart"')[1] || '').split('</svg>')[0];
@@ -411,7 +412,7 @@ test('render: chart source labels basename file paths but keep command targets w
   };
   const html = render(payload, TEMPLATE);
   // Bash keeps its full command (not basenamed to "foo.js"); Read is basenamed.
-  assert.match(html, /data-source="Bash git diff src\/foo.js · Read c.js"/);
+  assert.match(html, /data-source="Bash: git diff src\/foo.js · Read c.js"/);
 });
 
 test('render: chart source labels are not over-truncated, and user prompts show their text', () => {
@@ -431,9 +432,34 @@ test('render: chart source labels are not over-truncated, and user prompts show 
   };
   const html = render(payload, TEMPLATE);
   // A 57-char command is shown whole, not clipped to a 24-char stub.
-  assert.match(html, new RegExp('data-source="Bash ' + longCmd.replace(/[.\\/]/g, '\\$&') + '"'));
+  assert.match(html, new RegExp('data-source="Bash: ' + longCmd.replace(/[.\\/]/g, '\\$&') + '"'));
   // A user-prompt source surfaces the actual message text, not just "your message".
   assert.match(html, /data-source="your message: please refactor the auth module and add tests"/);
+});
+
+test('render: chart classifies skill dispatches, questions, and pasted images', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['AskUserQuestion'],
+        contextSources: [
+          { tool: 'user-prompt', target: 'Base directory for this skill: /home/u/.claude/plugins/cache/x/superpowers/6.0.3/skills/brainstorming # Brainstorming …' },
+          { tool: 'AskUserQuestion', target: 'Which tooltip format?' },
+        ] },
+      { seq: 2, agent: 'main', isMain: true, cost: 0.1, prompt: 'p2', turnIndex: 2,
+        tokens: { input: 0, cacheRead: 40000, cacheWrite: 6000, output: 100 }, tools: [],
+        contextSources: [
+          { tool: 'user-prompt', target: 'fix the graph [Image: source: /home/u/.claude/image-cache/a/1.png] thanks' },
+        ] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Skill expansion collapses to its name; AskUserQuestion shows the question asked.
+  assert.match(html, /data-source="skill: brainstorming · asked: Which tooltip format\?"/);
+  // A pasted image gets its own leading line before the message text.
+  assert.match(html, /data-source="1 image pasted · your message: fix the graph \[Image: source:[^"]*\] thanks"/);
 });
 
 test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {

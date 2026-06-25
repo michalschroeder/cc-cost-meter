@@ -276,7 +276,7 @@
      border, hard bevel (never a soft shadow), zero radius, yellow Helvetica-caps
      header. Follows the cursor; replaces the browser's slow native title popup. */
   .tip { position:fixed; top:0; left:0; z-index:100; pointer-events:none;
-    max-width:360px; background:var(--canvas); color:var(--ink);
+    max-width:520px; background:var(--canvas); color:var(--ink);
     border:1px solid var(--frame); box-shadow:4px 4px 0 #000;
     opacity:0; transition:opacity .08s ease-out; will-change:transform; }
   .tip.show { opacity:1; }
@@ -289,6 +289,11 @@
   .tip .tip-meta { font-family:var(--font-head); font-size:12px; color:#333; padding:6px 11px 0; }
   .tip .tip-b { font-family:var(--font-body); font-size:14.5px; line-height:1.4; color:#222;
     padding:7px 11px 10px; }
+  /* One source per line under "new in context", hanging-indented with a bullet so a
+     long command or message wraps under itself instead of colliding with the next. */
+  .tip .tip-src { font-family:var(--font-body); font-size:13.5px; line-height:1.35;
+    color:#222; padding:3px 0 0 18px; text-indent:-9px; word-break:break-word; }
+  .tip .tip-src::before { content:"• "; }
   .prompt { font-family:var(--font-body); color:#333; }
   /* Small-print notes under tables (estimate disclaimer, thinking headline). */
   p.note { font-family:var(--font-body); color:#333; font-size:13px; }
@@ -611,17 +616,20 @@
 
   wire('.ctx-chart', 'ctx-readout', 'ctx-bar',
     function (d) {
+      var srcs = d.source ? d.source.split(' · ') : [];
+      var lines = '';
+      for (var i = 0; i < srcs.length; i++) lines += '<div class="tip-src">' + esc(srcs[i]) + '</div>';
       return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.total) + ' context</div>' +
         '<div class="tip-cost">' + esc(d.cost) + '</div>' +
         '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · +' + esc(d.mins) + ' from start</div>' +
         (d.tools ? '<div class="tip-b">ran: ' + esc(d.tools) + '</div>' : '') +
-        (d.source ? '<div class="tip-b">+' + esc(d.written) + ' written ← ' + esc(d.source) + '</div>' : '');
+        (srcs.length ? '<div class="tip-b">new in context (+' + esc(d.written) + '):' + lines + '</div>' : '');
     },
     function (d) {
       return 'step ' + d.step + ' · ' + d.total + ' context (' + d.cached + ' re-read + ' + d.written +
         ' written) · ' + d.cost + ' · +' + d.mins + ' from start' +
         (d.tools ? ' · ran: ' + d.tools : '') +
-        (d.source ? ' · written ← ' + d.source : '');
+        (d.source ? ' · new in context: ' + d.source : '');
     });
 
   wire('.ctx-growbar', 'grow-readout', 'ctx-seg',

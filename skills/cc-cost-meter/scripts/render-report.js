@@ -238,21 +238,55 @@ const toolTally = (tools) => {
   for (const t of tools) n.set(t, (n.get(t) || 0) + 1);
   return [...n].map(([t, c]) => (c > 1 ? `${t} ×${c}` : t)).join(' · ');
 };
-// Tools whose target is a file path (basename'd); others (Bash/Grep/…) show the target whole.
+// Tools whose target is a file path (basename'd); others keep the whole target.
 const PATH_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-// One context source as "Read foo.js": tool + target. File-path tools → basename;
-// other tools (Bash commands, Grep patterns) keep the whole target. user-prompt →
-// the message text itself. Caps are generous: the styled tooltip wraps at its
-// max-width, so labels should show the meaningful part, not a 24-char stub.
+// A skill dispatch's name from its expansion prompt ("Base directory for this skill:
+// /…/<name> …") or a typed slash command ("/name …"); null otherwise. Mirrors
+// session-detail's skillName, but the renderer stays decoupled from the lib (it
+// consumes only the JSON contract).
+const skillFromPrompt = (text) => {
+  if (!text) return null;
+  const base = /^Base directory for this skill:\s*(\S+)/.exec(text);
+  if (base) return base[1].replace(/\/+$/, '').split(/[\\/]/).pop();
+  const slash = /^\/([A-Za-z0-9_:-]+)(\s|$)/.exec(text);
+  return slash ? slash[1] : null;
+};
+// One context source, classified for the "new in context" list. A user message that
+// is a skill dispatch → "skill: <name>"; otherwise the message text. A tool result →
+// "<Tool> <file>" for path tools, "asked: <question>" for AskUserQuestion, else
+// "<Tool>: <target>". Caps are generous; the styled tooltip wraps at its max-width.
+// Image tallies are handled by the caller (their own line), not here.
 const sourceLabel = (s) => {
   if (!s) return '';
   if (s.tool === 'user-prompt') {
-    const msg = truncate(s.target, 1000);
+    const text = String(s.target || '');
+    const sk = skillFromPrompt(text);
+    if (sk) return `skill: ${sk}`;
+    const msg = truncate(text, 1000);
     return msg ? `your message: ${msg}` : 'your message';
   }
+  if (s.tool === 'AskUserQuestion') {
+    const q = truncate(s.target, 160);
+    return q ? `asked: ${q}` : 'asked a question';
+  }
   const t = String(s.target || '');
-  const label = PATH_TOOLS.has(s.tool) ? (t.split(/[\\/]/).pop() || t) : t;
-  return `${s.tool} ${truncate(label, 80)}`.trim();
+  if (PATH_TOOLS.has(s.tool)) return `${s.tool} ${truncate(t.split(/[\\/]/).pop() || t, 80)}`.trim();
+  return t ? `${s.tool}: ${truncate(t, 200)}` : s.tool;
+};
+// The labels that enter the "new in context" list for a step: each source via
+// sourceLabel, plus a leading "N image(s) pasted" line when a user message carried
+// pasted images (a real, often heavy context cost that's easy to miss in the prose).
+const sourceLabels = (sources) => {
+  const out = [];
+  for (const s of (sources || [])) {
+    if (s && s.tool === 'user-prompt') {
+      const imgs = (String(s.target || '').match(/\[Image: source:/g) || []).length;
+      if (imgs) out.push(`${imgs} image${imgs > 1 ? 's' : ''} pasted`);
+    }
+    const lbl = sourceLabel(s);
+    if (lbl) out.push(lbl);
+  }
+  return out;
 };
 // Minutes between two ISO timestamps; null when either is missing/unparseable.
 const minsBetween = (a, b) => {
@@ -338,7 +372,7 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
       prevTurn = c.turnIndex;
     }
     const toolsStr = toolTally(c.tools);
-    const sourcesStr = (c.contextSources || []).map(sourceLabel).filter(Boolean).join(' · ');
+    const sourcesStr = sourceLabels(c.contextSources).join(' · ');
     const dataBase = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
       ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"`;
     const data = dataBase +
@@ -353,7 +387,7 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
     const hCached = Math.max(baseY - yCached, 0.5);
     parts.push(`<rect class="ctx-bar ${tierClass(cached, highCtx, resetDrop)}" x="${xv}" y="${yCached.toFixed(1)}" width="${barW.toFixed(2)}" height="${hCached.toFixed(1)}"${data}>` +
       `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · +${esc(fmtMins(mins))}` +
-      `${toolsStr ? ` — ran ${esc(toolsStr)}` : ''}${sourcesStr ? `; written ← ${esc(sourcesStr)}` : ''}</title></rect>`);
+      `${toolsStr ? ` — ran ${esc(toolsStr)}` : ''}${sourcesStr ? `; new in context: ${esc(sourcesStr)}` : ''}</title></rect>`);
     prevTotal = total; prevCached = cached;
   });
   parts.push(`<line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" class="grid"/>`);

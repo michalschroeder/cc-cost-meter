@@ -54,6 +54,11 @@ function toolTarget(name, input) {
     case 'WebFetch': t = first('url'); break;
     case 'WebSearch': t = first('query'); break;
     case 'Skill': t = first('skill'); break;
+    case 'AskUserQuestion': {
+      const q = Array.isArray(input.questions) ? input.questions[0] : null;
+      t = (q && typeof q === 'object') ? String(q.question || q.header || '') : '';
+      break;
+    }
     default: t = first('file_path', 'path', 'command', 'pattern', 'url', 'query', 'description', 'prompt');
   }
   return t.replace(/\s+/g, ' ').trim().slice(0, 200);

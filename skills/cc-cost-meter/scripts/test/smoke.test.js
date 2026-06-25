@@ -133,3 +133,28 @@ test('smoke: main calls expose contextSources for what landed before them', asyn
     { tool: 'Bash', target: 'git log --stat' },
   ]);
 });
+
+// An AskUserQuestion result is attributed to the question it asked, so the tooltip
+// can say which one — toolTarget pulls the first question's text.
+test('smoke: AskUserQuestion context source carries the question asked', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    { type: 'user', message: { role: 'user', content: 'ask me something' }, uuid: 'u1' },
+    { type: 'assistant', timestamp: '2024-06-01T10:00:00Z',
+      message: { id: 'm1', role: 'assistant', model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200 },
+        content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion',
+          input: { questions: [{ question: 'Pick format A or B?', header: 'Format' }] } }] }, uuid: 'a1' },
+    { type: 'user', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'q1', content: 'A'.repeat(800) },
+    ] }, uuid: 'u2' },
+    { type: 'assistant', timestamp: '2024-06-01T10:01:00Z',
+      message: { id: 'm2', role: 'assistant', model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 0, output_tokens: 30, cache_read_input_tokens: 5000, cache_creation_input_tokens: 18000 },
+        content: [{ type: 'text', text: 'done' }] }, uuid: 'a2' },
+  ];
+  writeTranscript(cfg, 'smoke005', entries, 1717200000);
+  const out = await runJson(['smoke005'], cfg);
+  const mains = out.calls.filter((c) => c.isMain);
+  assert.deepStrictEqual(mains[1].contextSources, [{ tool: 'AskUserQuestion', target: 'Pick format A or B?' }]);
+});
