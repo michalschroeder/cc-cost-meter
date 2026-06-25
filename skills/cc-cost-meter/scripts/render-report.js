@@ -231,6 +231,21 @@ const RESET_DROP = 100000;
 const ctxOf = (c) => (c.tokens && c.tokens.cacheRead) || 0;
 const writtenOf = (c) => (c.tokens && (c.tokens.cacheWrite + c.tokens.input)) || 0;
 const totalCtxOf = (c) => ctxOf(c) + writtenOf(c);
+// Tool tally for a step: "Read ×2 · Bash · Edit" in first-seen order, ×N only when >1.
+const toolTally = (tools) => {
+  if (!tools || !tools.length) return '';
+  const n = new Map();
+  for (const t of tools) n.set(t, (n.get(t) || 0) + 1);
+  return [...n].map(([t, c]) => (c > 1 ? `${t} ×${c}` : t)).join(' · ');
+};
+// One context source as "Read foo.js": tool + basename(target) (file paths → last
+// segment; other targets truncated). user-prompt → "your message".
+const sourceLabel = (s) => {
+  if (!s) return '';
+  if (s.tool === 'user-prompt') return 'your message';
+  const base = String(s.target || '').split(/[\\/]/).pop() || '';
+  return `${s.tool} ${truncate(base, 24)}`.trim();
+};
 // Minutes between two ISO timestamps; null when either is missing/unparseable.
 const minsBetween = (a, b) => {
   const t0 = Date.parse(a), t1 = Date.parse(b);
@@ -314,18 +329,23 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
       parts.push(`<rect class="ctx-turn ${tick}" x="${xv}" y="${baseY + 3}" width="${Math.max(barW, 2).toFixed(2)}" height="5"><title>${esc(truncate(c.prompt, 110))}</title></rect>`);
       prevTurn = c.turnIndex;
     }
-    const data = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
-      ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"` +
-      ` data-prompt="${esc(truncate(c.prompt || '', 110))}"`;
+    const toolsStr = toolTally(c.tools);
+    const sourcesStr = (c.contextSources || []).map(sourceLabel).filter(Boolean).join(' · ');
+    const dataBase = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
+      ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"`;
+    const data = dataBase +
+      (toolsStr ? ` data-tools="${esc(toolsStr)}"` : '') +
+      (sourcesStr ? ` data-source="${esc(sourcesStr)}"` : '');
     // Written cap on top (yMax..yAt(total) down to yAt(cached)), cached base below it.
     const yTotal = yAt(total), yCached = yAt(cached);
     const hWritten = Math.max(yCached - yTotal, 0);
     if (hWritten > 0.2) {
-      parts.push(`<rect class="ctx-bar ctx-written" x="${xv}" y="${yTotal.toFixed(1)}" width="${barW.toFixed(2)}" height="${hWritten.toFixed(1)}"${data}/>`);
+      parts.push(`<rect class="ctx-bar ctx-written" x="${xv}" y="${yTotal.toFixed(1)}" width="${barW.toFixed(2)}" height="${hWritten.toFixed(1)}"${dataBase}/>`);
     }
     const hCached = Math.max(baseY - yCached, 0.5);
     parts.push(`<rect class="ctx-bar ${tierClass(cached, highCtx, resetDrop)}" x="${xv}" y="${yCached.toFixed(1)}" width="${barW.toFixed(2)}" height="${hCached.toFixed(1)}"${data}>` +
-      `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · +${esc(fmtMins(mins))}</title></rect>`);
+      `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · +${esc(fmtMins(mins))}` +
+      `${toolsStr ? ` — ran ${esc(toolsStr)}` : ''}${sourcesStr ? `; written ← ${esc(sourcesStr)}` : ''}</title></rect>`);
     prevTotal = total; prevCached = cached;
   });
   parts.push(`<line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" class="grid"/>`);
@@ -424,7 +444,7 @@ function contextGrowthBar(calls, turns, resetDrop = RESET_DROP, baselineTokens =
       : `${truncate(s.label, 110)} — grew context ${compactTokens(s.from)} → ${compactTokens(s.to)} (+${compactTokens(s.grow)}) · ${s.steps} steps · ${money(s.cost)}`;
     parts.push(`<rect class="ctx-seg ${KIND_CLASS[s.kind] || KIND_CLASS.user}" x="${x.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}"` +
       ` data-kind="${esc(s.kind)}" data-grow="${esc(compactTokens(s.grow))}" data-from="${esc(compactTokens(s.from))}" data-to="${esc(compactTokens(s.to))}"` +
-      ` data-steps="${esc(s.steps)}" data-cost="${esc(money(s.cost))}" data-prompt="${esc(truncate(s.label, 110))}">` +
+      ` data-steps="${esc(s.steps)}" data-cost="${esc(money(s.cost))}">` +
       `<title>${esc(tip)}</title></rect>`);
     x += w;
   }

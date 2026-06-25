@@ -614,12 +614,14 @@
       return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.total) + ' context</div>' +
         '<div class="tip-cost">' + esc(d.cost) + '</div>' +
         '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · +' + esc(d.mins) + ' from start</div>' +
-        (d.prompt ? '<div class="tip-b">serving: ' + esc(d.prompt) + '</div>' : '');
+        (d.tools ? '<div class="tip-b">ran: ' + esc(d.tools) + '</div>' : '') +
+        (d.source ? '<div class="tip-b">+' + esc(d.written) + ' written ← ' + esc(d.source) + '</div>' : '');
     },
     function (d) {
       return 'step ' + d.step + ' · ' + d.total + ' context (' + d.cached + ' re-read + ' + d.written +
         ' written) · ' + d.cost + ' · +' + d.mins + ' from start' +
-        (d.prompt ? ' · serving: ' + d.prompt : '');
+        (d.tools ? ' · ran: ' + d.tools : '') +
+        (d.source ? ' · written ← ' + d.source : '');
     });
 
   wire('.ctx-growbar', 'grow-readout', 'ctx-seg',

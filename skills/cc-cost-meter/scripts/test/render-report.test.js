@@ -353,6 +353,50 @@ test('render: context timeline draws one bar per MAIN step, threshold tiers, esc
   assert.match(html, /evil &lt;img src=x onerror=alert\(1\)&gt; prompt/);
 });
 
+test('render: chart tooltip shows tools ran and context sources, not the prompt', () => {
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.13, prompt: 'p', turnIndex: 1, ts: ts(0),
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Read', 'Read', 'Bash'],
+        contextSources: [{ tool: 'Read', target: '/repo/src/foo.js' }, { tool: 'Bash', target: 'git log --stat' }] },
+      { seq: 2, agent: 'main', isMain: true, cost: 0.10, prompt: 'p2', turnIndex: 2, ts: ts(2),
+        tokens: { input: 0, cacheRead: 40000, cacheWrite: 0, output: 100 } },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // SVG data attributes drive the styled tooltip: tally + basename'd sources.
+  assert.match(html, /data-tools="Read ×2 · Bash"/);
+  assert.match(html, /data-source="Read foo.js · Bash git log --stat"/);
+  // Only the first bar has tools; the second (no tools/sources) omits the attrs.
+  assert.strictEqual((html.match(/data-tools=/g) || []).length, 1);
+  assert.strictEqual((html.match(/data-source=/g) || []).length, 1);
+  // Native <title> fallback gained the did/ate suffix.
+  assert.match(html, /— ran Read ×2 · Bash; written ← Read foo.js · Bash git log --stat/);
+  // The old prompt-echo is gone from both the SVG and the client script.
+  assert.ok(!html.includes('data-prompt='), 'data-prompt removed from bars');
+  assert.ok(!/serving: '/.test(html), 'serving line removed from client tooltip script');
+  // The client tooltip script now emits the "ran:" line.
+  assert.match(html, /ran: ' \+ esc\(d\.tools\)/);
+});
+
+test('render: chart tooltip escapes hostile context-source targets', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Read'],
+        contextSources: [{ tool: 'Read', target: '/repo/<x> & "y".js' }] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  assert.match(html, /data-source="Read &lt;x&gt; &amp; &quot;y&quot;\.js"/);
+  assert.ok(!html.includes('<x>'), 'raw target leaked into svg');
+});
+
 test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {
   // A rebuild step: cacheRead collapses (210k → 8k) but the total holds (the window was
   // re-written, cacheWrite spikes), so it is NOT a reset.
