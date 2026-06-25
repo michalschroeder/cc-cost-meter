@@ -117,7 +117,7 @@ function parseCalls(file, trackPrompts, consumers) {
       const p = promptText(o);
       if (p) {
         current = p; turn++;
-        if (consumers) consumers.push({ tool: 'user-prompt', target: p.slice(0, 200), estTokens: Math.round(p.length / CHARS_PER_TOKEN), afterStep: order.length });
+        if (consumers) consumers.push({ tool: 'user-prompt', target: p.slice(0, 1000), estTokens: Math.round(p.length / CHARS_PER_TOKEN), afterStep: order.length });
       }
     }
     if (consumers) {

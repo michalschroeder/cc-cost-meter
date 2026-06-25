@@ -241,14 +241,18 @@ const toolTally = (tools) => {
 // Tools whose target is a file path (basename'd); others (Bash/Grep/…) show the target whole.
 const PATH_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // One context source as "Read foo.js": tool + target. File-path tools → basename;
-// other tools (Bash commands, Grep patterns) keep the whole target. Both truncated.
-// user-prompt → "your message".
+// other tools (Bash commands, Grep patterns) keep the whole target. user-prompt →
+// the message text itself. Caps are generous: the styled tooltip wraps at its
+// max-width, so labels should show the meaningful part, not a 24-char stub.
 const sourceLabel = (s) => {
   if (!s) return '';
-  if (s.tool === 'user-prompt') return 'your message';
+  if (s.tool === 'user-prompt') {
+    const msg = truncate(s.target, 1000);
+    return msg ? `your message: ${msg}` : 'your message';
+  }
   const t = String(s.target || '');
   const label = PATH_TOOLS.has(s.tool) ? (t.split(/[\\/]/).pop() || t) : t;
-  return `${s.tool} ${truncate(label, 24)}`.trim();
+  return `${s.tool} ${truncate(label, 80)}`.trim();
 };
 // Minutes between two ISO timestamps; null when either is missing/unparseable.
 const minsBetween = (a, b) => {
