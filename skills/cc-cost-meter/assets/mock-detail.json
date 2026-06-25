@@ -83,7 +83,13 @@
         "cacheWrite": 8000,
         "output": 600
       },
-      "ts": "2026-01-01T00:00:00.000Z"
+      "ts": "2026-01-01T00:00:00.000Z",
+      "tools": ["Read", "Read", "Grep"],
+      "contextSources": [
+        { "tool": "Read", "target": "/repo/src/auth/token-service.js" },
+        { "tool": "Read", "target": "/repo/src/auth/session.js" },
+        { "tool": "Grep", "target": "verifyToken" }
+      ]
     },
     {
       "seq": 2,
@@ -98,7 +104,11 @@
         "cacheWrite": 4000,
         "output": 800
       },
-      "ts": "2026-01-01T00:02:00.000Z"
+      "ts": "2026-01-01T00:02:00.000Z",
+      "tools": ["Edit", "Bash"],
+      "contextSources": [
+        { "tool": "Bash", "target": "npm test -- auth.spec.ts" }
+      ]
     },
     {
       "seq": 3,
