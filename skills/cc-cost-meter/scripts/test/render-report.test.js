@@ -399,6 +399,21 @@ test('render: chart tooltip escapes hostile context-source targets', () => {
   assert.ok(!html.includes('<x>'), 'raw target leaked into svg');
 });
 
+test('render: chart source labels basename file paths but keep command targets whole', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Bash'],
+        contextSources: [{ tool: 'Bash', target: 'git diff src/foo.js' }, { tool: 'Read', target: '/a/b/c.js' }] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Bash keeps its full command (not basenamed to "foo.js"); Read is basenamed.
+  assert.match(html, /data-source="Bash git diff src\/foo.js · Read c.js"/);
+});
+
 test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {
   // A rebuild step: cacheRead collapses (210k → 8k) but the total holds (the window was
   // re-written, cacheWrite spikes), so it is NOT a reset.

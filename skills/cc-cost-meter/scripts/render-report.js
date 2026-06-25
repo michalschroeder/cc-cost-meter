@@ -238,13 +238,17 @@ const toolTally = (tools) => {
   for (const t of tools) n.set(t, (n.get(t) || 0) + 1);
   return [...n].map(([t, c]) => (c > 1 ? `${t} ×${c}` : t)).join(' · ');
 };
-// One context source as "Read foo.js": tool + basename(target) (file paths → last
-// segment; other targets truncated). user-prompt → "your message".
+// Tools whose target is a file path (basename'd); others (Bash/Grep/…) show the target whole.
+const PATH_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// One context source as "Read foo.js": tool + target. File-path tools → basename;
+// other tools (Bash commands, Grep patterns) keep the whole target. Both truncated.
+// user-prompt → "your message".
 const sourceLabel = (s) => {
   if (!s) return '';
   if (s.tool === 'user-prompt') return 'your message';
-  const base = String(s.target || '').split(/[\\/]/).pop() || '';
-  return `${s.tool} ${truncate(base, 24)}`.trim();
+  const t = String(s.target || '');
+  const label = PATH_TOOLS.has(s.tool) ? (t.split(/[\\/]/).pop() || t) : t;
+  return `${s.tool} ${truncate(label, 24)}`.trim();
 };
 // Minutes between two ISO timestamps; null when either is missing/unparseable.
 const minsBetween = (a, b) => {
