@@ -444,7 +444,7 @@ function contextGrowthBar(calls, turns, resetDrop = RESET_DROP, baselineTokens =
       : `${truncate(s.label, 110)} — grew context ${compactTokens(s.from)} → ${compactTokens(s.to)} (+${compactTokens(s.grow)}) · ${s.steps} steps · ${money(s.cost)}`;
     parts.push(`<rect class="ctx-seg ${KIND_CLASS[s.kind] || KIND_CLASS.user}" x="${x.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}"` +
       ` data-kind="${esc(s.kind)}" data-grow="${esc(compactTokens(s.grow))}" data-from="${esc(compactTokens(s.from))}" data-to="${esc(compactTokens(s.to))}"` +
-      ` data-steps="${esc(s.steps)}" data-cost="${esc(money(s.cost))}">` +
+      ` data-steps="${esc(s.steps)}" data-cost="${esc(money(s.cost))}" data-prompt="${esc(truncate(s.label, 110))}">` +
       `<title>${esc(tip)}</title></rect>`);
     x += w;
   }

@@ -375,8 +375,10 @@ test('render: chart tooltip shows tools ran and context sources, not the prompt'
   assert.strictEqual((html.match(/data-source=/g) || []).length, 1);
   // Native <title> fallback gained the did/ate suffix.
   assert.match(html, /— ran Read ×2 · Bash; written ← Read foo.js · Bash git log --stat/);
-  // The old prompt-echo is gone from both the SVG and the client script.
-  assert.ok(!html.includes('data-prompt='), 'data-prompt removed from bars');
+  // The old prompt-echo is gone from the context-timeline bars and the client script.
+  // (Scoped to the ctx-chart SVG — the separate growth bar legitimately keeps data-prompt.)
+  const chartSvg = (html.split('<svg class="ctx-chart"')[1] || '').split('</svg>')[0];
+  assert.ok(!chartSvg.includes('data-prompt='), 'data-prompt removed from timeline bars');
   assert.ok(!/serving: '/.test(html), 'serving line removed from client tooltip script');
   // The client tooltip script now emits the "ran:" line.
   assert.match(html, /ran: ' \+ esc\(d\.tools\)/);
