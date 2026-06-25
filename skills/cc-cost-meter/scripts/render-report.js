@@ -222,16 +222,15 @@ function skillRows(bySkill) {
 // summary.contextResetDropTokens; these defaults only cover older payloads.
 const HIGH_CONTEXT = 200000;
 const RESET_DROP = 100000;
-// Context size at one step = the call's cacheRead (re-read accumulated context).
-// SAME basis the data layer uses for summary.highContextCost and contextResets, so
-// the chart's tiers and reset lines never contradict the cards rendered beside them.
+// A step's context splits in two: `ctxOf` is the re-read base (the call's cacheRead —
+// cheap, the tier-colored base) and `writtenOf` is everything freshly cached + fresh
+// input that step (the expensive cap); together they sum to the real window size.
+// `ctxOf` is the SAME basis the data layer uses for summary.highContextCost and
+// contextResets, so the chart's tiers and reset lines never contradict the cards beside
+// them.
 const ctxOf = (c) => (c.tokens && c.tokens.cacheRead) || 0;
-// The two parts of a step's true context: `cached` is re-read from the prompt cache
-// (cheap, the tier-colored base), `written` is everything freshly cached + fresh input
-// that step (the expensive cap). cached + written = the real window size that step.
-const cachedOf = (c) => (c.tokens && c.tokens.cacheRead) || 0;
 const writtenOf = (c) => (c.tokens && (c.tokens.cacheWrite + c.tokens.input)) || 0;
-const totalCtxOf = (c) => cachedOf(c) + writtenOf(c);
+const totalCtxOf = (c) => ctxOf(c) + writtenOf(c);
 // Minutes between two ISO timestamps; null when either is missing/unparseable.
 const minsBetween = (a, b) => {
   const t0 = Date.parse(a), t1 = Date.parse(b);
@@ -274,7 +273,7 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
   // Key on turnIndex, not prompt text: two distinct turns with identical text
   // (e.g. "continue" twice) stay separate ticks.
   const kindOf = new Map((turns || []).map((t) => [t.turnIndex, t.kind]));
-  const t0 = main.find((c) => c.ts) ? main.find((c) => c.ts).ts : null; // session start
+  const t0 = (main.find((c) => c.ts) || {}).ts || null; // session start
   const parts = [];
   // Diagonal-hatch fill for the "written this step" cap (referenced by .ctx-written).
   parts.push('<defs><pattern id="ctx-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
@@ -297,7 +296,7 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
   }
   let prevTurn = null, prevTotal = 0, prevCached = 0;
   main.forEach((c, i) => {
-    const cached = cachedOf(c), written = writtenOf(c), total = totalCtxOf(c);
+    const cached = ctxOf(c), written = writtenOf(c), total = cached + written;
     const xv = xAt(i).toFixed(1);
     const step = i + 1; // main-session step ordinal (matches summary.mainSteps / thinking seq)
     const mins = t0 && c.ts ? minsBetween(t0, c.ts) : null;
@@ -343,15 +342,17 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
   return `<svg class="ctx-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="context window size per step">${parts.join('')}</svg>`;
 }
 
+// "once" / "N times" — how many cache rebuilds, in prose (shared by the callout and card).
+const rebuildTimes = (n) => (n === 1 ? 'once' : `${n} times`);
+
 // Standalone warning card rendered under the chart when the prompt cache expired and was
 // rebuilt at least once. Deterministic (computed from summary.cacheRebuilds), so it's
 // always present when the data shows it, independent of the AI assessment.
 function cacheRebuildCallout(summary) {
   const cr = (summary && summary.cacheRebuilds) || {};
   if (!cr.count) return '';
-  const times = cr.count === 1 ? 'once' : `${cr.count} times`;
   return `<div class="callout callout-warn">
-    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache ${esc(times)}</div>
+    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache ${esc(rebuildTimes(cr.count))}</div>
     <p>The prompt cache holds the conversation so each step re-reads it cheaply. It expires after
     an idle gap — about <strong>1 hour on a Claude subscription</strong> (5 minutes on API-key usage).
     When that happens the next step has to re-write the whole window from scratch, which cost roughly
@@ -478,7 +479,7 @@ function buildAssessment(detail) {
       verdict: 'warn',
       title: 'Prompt cache expired mid-session',
       what: `The session was idle long enough that the prompt cache expired and had to be re-written ` +
-        `${cr.count === 1 ? 'once' : `${cr.count} times`}, costing about ${money(cr.extraCost)} extra.`,
+        `${rebuildTimes(cr.count)}, costing about ${money(cr.extraCost)} extra.`,
       why: 'The cache lets every step re-read the conversation cheaply. After an idle gap (~1h on a ' +
         'Claude subscription, ~5min on API keys) it expires, and the next step pays to re-cache the whole window.',
       how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
@@ -486,7 +487,7 @@ function buildAssessment(detail) {
   }
   const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null);
   if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards };
-  return cards.length ? { rating: null, headline: '', cards } : { rating: null, headline: '', cards: [] };
+  return { rating: null, headline: '', cards };
 }
 
 // The 1–5 grade badge that sits at the very top of the report. Empty when unrated.
