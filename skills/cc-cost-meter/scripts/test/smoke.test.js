@@ -99,3 +99,37 @@ test('smoke: empty store still emits valid list JSON', async () => {
   const out = await runJson(['list'], cfg);
   assert.deepStrictEqual(out.sessions, []);
 });
+
+// A step's contextSources name the largest things that landed in context right
+// before it (top 3, ranked by size) — what got newly written into that step.
+test('smoke: main calls expose contextSources for what landed before them', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    { type: 'user', message: { role: 'user', content: 'read the files' }, uuid: 'u1' },
+    { type: 'assistant', timestamp: '2024-06-01T10:00:00Z',
+      message: { id: 'm1', role: 'assistant', model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200 },
+        content: [
+          { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/repo/src/foo.js' } },
+          { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'git log --stat' } },
+        ] }, uuid: 'a1' },
+    { type: 'user', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 't1', content: 'X'.repeat(16000) }, // ~4k tok — bigger
+      { type: 'tool_result', tool_use_id: 't2', content: 'Y'.repeat(6000) },  // ~1.5k tok
+    ] }, uuid: 'u2' },
+    { type: 'assistant', timestamp: '2024-06-01T10:01:00Z',
+      message: { id: 'm2', role: 'assistant', model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 0, output_tokens: 30, cache_read_input_tokens: 5000, cache_creation_input_tokens: 18000 },
+        content: [{ type: 'text', text: 'done' }] }, uuid: 'a2' },
+  ];
+  writeTranscript(cfg, 'smoke004', entries, 1717200000);
+  const out = await runJson(['smoke004'], cfg);
+  const mains = out.calls.filter((c) => c.isMain);
+  // m1's request was driven by the user prompt that preceded it.
+  assert.deepStrictEqual(mains[0].contextSources, [{ tool: 'user-prompt', target: 'read the files' }]);
+  // m2's written context = the two tool results that came back, biggest first.
+  assert.deepStrictEqual(mains[1].contextSources, [
+    { tool: 'Read', target: '/repo/src/foo.js' },
+    { tool: 'Bash', target: 'git log --stat' },
+  ]);
+});

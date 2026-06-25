@@ -345,6 +345,22 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     if (!cur || e.estTokens > cur.estTokens) triggerByIdx.set(e.afterStep, e);
   }
   summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx);
+  // Top-3 things that landed in context right before each main call — what got
+  // newly written into that step — attached per call for the chart tooltip. Same
+  // afterStep→call mapping triggerByIdx/mainIdx already use; estTokens only ranks
+  // here and is intentionally not serialized (the tooltip shows names, no numbers).
+  const sourcesByIdx = new Map();
+  for (const e of consumerEvents) {
+    const arr = sourcesByIdx.get(e.afterStep) || [];
+    arr.push(e); sourcesByIdx.set(e.afterStep, arr);
+  }
+  mainCalls.forEach((c, j) => {
+    const evs = sourcesByIdx.get(mainIdx[j]);
+    if (evs && evs.length) {
+      c.contextSources = evs.slice().sort((a, b) => b.estTokens - a.estTokens)
+        .slice(0, 3).map((e) => ({ tool: e.tool, target: e.target }));
+    }
+  });
   // Cost per skill: the turns each skill dispatch drove (its expansion prompt or
   // /slash command), summed by extracted skill name. Only the dispatch's own
   // turns — later work the skill influenced is attributed to those prompts.
