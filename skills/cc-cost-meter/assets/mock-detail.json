@@ -89,7 +89,8 @@
         { "tool": "Read", "target": "/repo/src/auth/token-service.js" },
         { "tool": "Read", "target": "/repo/src/auth/session.js" },
         { "tool": "Grep", "target": "verifyToken" }
-      ]
+      ],
+      "contextSourceTokens": 5000
     },
     {
       "seq": 2,
@@ -108,7 +109,8 @@
       "tools": ["Edit", "Bash"],
       "contextSources": [
         { "tool": "Bash", "target": "npm test -- auth.spec.ts" }
-      ]
+      ],
+      "contextSourceTokens": 800
     },
     {
       "seq": 3,

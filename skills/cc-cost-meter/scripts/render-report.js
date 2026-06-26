@@ -372,7 +372,20 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
       prevTurn = c.turnIndex;
     }
     const toolsStr = toolTally(c.tools);
-    const sourcesStr = sourceLabels(c.contextSources).join(' · ');
+    const srcLabels = sourceLabels(c.contextSources);
+    // Attribute the part of `written` the tracked sources (user msgs + tool results)
+    // don't cover: the model's own prior reply being committed to the cache — or, on
+    // the first step, the system prompt + tool defs. Only when it's a real share, so a
+    // one-word "yes" stops looking like it cost 2k, without adding noise to a step a
+    // big file read already explains.
+    if (typeof c.contextSourceTokens === 'number') {
+      const remainder = written - c.contextSourceTokens;
+      if (remainder >= 300 && remainder * 4 >= written) {
+        const what = i === 0 ? 'session startup (system prompt + tool defs)' : "the model's previous reply";
+        srcLabels.unshift(`${what} (~${compactTokens(remainder)})`);
+      }
+    }
+    const sourcesStr = srcLabels.join(' · ');
     const dataBase = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
       ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"`;
     const data = dataBase +

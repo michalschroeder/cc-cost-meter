@@ -354,6 +354,9 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   // newly written into that step — attached per call for the chart tooltip. Same
   // afterStep→call mapping triggerByIdx/mainIdx already use; estTokens only ranks
   // here and is intentionally not serialized (the tooltip shows names, no numbers).
+  // contextSourceTokens is the est. size of ALL such tracked inflow (user msgs +
+  // tool results), so a renderer can attribute the rest of `written` to the model's
+  // own prior reply — otherwise a one-word "yes" looks like it cost 2k.
   const sourcesByIdx = new Map();
   for (const e of consumerEvents) {
     const arr = sourcesByIdx.get(e.afterStep) || [];
@@ -364,6 +367,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     if (evs && evs.length) {
       c.contextSources = evs.slice().sort((a, b) => b.estTokens - a.estTokens)
         .slice(0, 3).map((e) => ({ tool: e.tool, target: e.target }));
+      c.contextSourceTokens = evs.reduce((a, e) => a + (e.estTokens || 0), 0);
     }
   });
   // Cost per skill: the turns each skill dispatch drove (its expansion prompt or

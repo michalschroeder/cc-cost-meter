@@ -462,6 +462,41 @@ test('render: chart classifies skill dispatches, questions, and pasted images', 
   assert.match(html, /data-source="1 image pasted · your message: fix the graph \[Image: source:[^"]*\] thanks"/);
 });
 
+test('render: tooltip attributes the unexplained written tokens to reply / startup', () => {
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const payload = {
+    ...detail,
+    calls: [
+      // Step 1 (i=0): 20k written, a tiny tracked source → the rest is session startup.
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1, ts: ts(0),
+        tokens: { input: 0, cacheRead: 0, cacheWrite: 20000, output: 100 },
+        tools: [], contextSources: [{ tool: 'user-prompt', target: 'start' }], contextSourceTokens: 2 },
+      // A later step: user said "yes"; the 2k written is the model's prior reply, not "yes".
+      { seq: 2, agent: 'main', isMain: true, cost: 0.06, prompt: 'yes', turnIndex: 2, ts: ts(1),
+        tokens: { input: 0, cacheRead: 58000, cacheWrite: 2000, output: 100 },
+        tools: ['Read'], contextSources: [{ tool: 'user-prompt', target: 'yes' }], contextSourceTokens: 1 },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  assert.match(html, /data-source="session startup \(system prompt \+ tool defs\) \(~20k\) · your message: start"/);
+  assert.match(html, /data-source="the model&#39;s previous reply \(~2k\) · your message: yes"/);
+});
+
+test('render: tooltip does not invent a reply line when sources already cover the written', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 16000, output: 100 },
+        tools: ['Read'], contextSources: [{ tool: 'Read', target: '/a/big.js' }], contextSourceTokens: 16000 },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Read result accounts for the 16k written → no synthetic "previous reply" line.
+  assert.match(html, /data-source="Read big.js"/);
+  assert.ok(!html.includes('previous reply'), 'no spurious reply attribution');
+});
+
 test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {
   // A rebuild step: cacheRead collapses (210k → 8k) but the total holds (the window was
   // re-written, cacheWrite spikes), so it is NOT a reset.
