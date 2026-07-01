@@ -464,7 +464,8 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
   const topSteps = steps.sort((a, b) => b.tokens - a.tokens).slice(0, 5);
   return {
     note: 'The model\'s own output_tokens split by kind (billed at the full output rate — the priciest per-token tier). ' +
-      'thinking.unstoredTokens = output_tokens beyond the visible content — interleaved thinking the transcript does not store (its text is unrecoverable); ' +
+      'thinking.unstoredTokens = output_tokens beyond the visible content — interleaved thinking the transcript does not store (its text is unrecoverable). ' +
+      'It is an UPPER estimate: visible content is sized at ~4 chars/token, and dense code/tool args tokenize denser, so some of the excess is really tool-call payload. ' +
       'thinking.byTurn names which prompts drove the reasoning; thinking.topSteps are the heaviest single bursts, each with its trigger (what landed in context right before) and the action it took next. ' +
       'Estimates apportioned per call from exact output_tokens.',
     byKind: kinds,

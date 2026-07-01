@@ -24,7 +24,8 @@ grows. Internalize these mechanics; the WHY on every card should trace back to o
   or 2× (1-hour). So a stable, re-read prefix is cheap — until something busts it. Cache
   invalidators: switching model mid-session (`/model`, the opusplan toggle), changing `/effort`,
   editing CLAUDE.md, or any changing prefix (e.g. a timestamp). Idling past the TTL forces a
-  full re-write. After an invalidation the whole window is re-billed at input price, not 0.1×.
+  full re-write. After an invalidation the whole window is re-billed as a cache *write*
+  (1.25×–2× input price), not 0.1×.
 - **`cache_creation` vs `cache_read` is the health signal.** Healthy long sessions are almost
   all cache-read; high, repeated cache-creation means the prefix keeps changing (model/effort
   switch, CLAUDE.md edit) and is silently inflating the bill.

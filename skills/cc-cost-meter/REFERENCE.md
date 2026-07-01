@@ -8,8 +8,9 @@
   parent's 200k+. It returns only a few-KB summary. So fan-out (planning, parallel review
   lenses, research) costs cents. In one measured $32.94 session, all 11 subagents (226 calls)
   were **$1.04 (3%)**; the main session (192 calls) was **$31.90 (97%)**.
-- `summary.highContextCost` = spend on calls **above 200k context** = exactly what a `/compact`
-  would have cut.
+- `summary.highContextCost` = the FULL spend on calls **above 200k context** — an **upper bound**
+  on what earlier compaction could have saved (a `/compact` shrinks context to a summary, not
+  zero, and the post-compact steps still cost something), not the exact saving.
 - `summary.byTurnKind` "subagent-orchestration" cost is **not** the subagents — it's the parent
   taking steps while already at 200k+. The fix is always: shrink the parent's context.
 
@@ -41,7 +42,9 @@
   model's output_tokens (billed at the full output rate, the priciest tier) into
   `text`/`thinking`/`toolCalls` with apportioned cost. `thinking` explains the big bucket:
   `unstoredTokens` is interleaved thinking — billed in `output_tokens` but never written to the
-  transcript (inferred as output_tokens minus visible chars/4) — vs `storedTokens` (saved thinking
+  transcript (inferred as output_tokens minus visible chars/4 — an UPPER estimate: dense
+  code/tool args run ~3–3.5 chars/token, so some of it is really tool-call payload) — vs
+  `storedTokens` (saved thinking
   blocks); `byTurn` names WHICH prompts drove the reasoning; `topSteps` are the heaviest single
   bursts, each with its `trigger` — what landed in context right before (the tool result or
   prompt it was reacting to) — and the action it took next. The thinking TEXT is never
