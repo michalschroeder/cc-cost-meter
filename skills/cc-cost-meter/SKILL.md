@@ -87,7 +87,39 @@ Unknown flags: ignore.
 4. **Interpret** with the cost model in [REFERENCE.md](REFERENCE.md).
 
 5. **Report (always model-written copy).**
-   - Narrate the cost story inline (where the money went, the biggest lever).
+   - **Narrate the cost story inline using the fixed skeleton below — emit these exact
+     headings, in this order, on every detail run.** No extra sections, no reordering. This
+     is what makes each run surface the same report format; only the two `<one sentence>` /
+     `<biggest lever>` prose lines are free text, everything else is mechanical.
+
+     ```markdown
+     ## <session title> — $<total> total
+
+     <one sentence: where the money went — the dominant token type / driver>
+
+     **Cost split**
+     - Token type: cache-read $X (Y%) · cache-write $X (Y%) · output $X (Y%) · input $X (Y%)
+     - Main vs subagents: main $X (Y%) · subagents $X (Y%)
+
+     **What filled the context**
+     1. <target> — ~<estTokens> tok, carried $<carriedCost>
+     2. <target> — ~<estTokens> tok, carried $<carriedCost>
+     3. <target> — ~<estTokens> tok, carried $<carriedCost>
+
+     **Biggest lever:** <the single highest-impact fix> — up to ~$<highContextCost> saved (upper bound).
+
+     **Grade:** <N>/5 — <assessment headline>
+
+     **Report:** <absolute path>
+     ```
+
+     Fill from fixed fields — do NOT improvise the numbers: token-type + main/subagent split
+     from `components` / `byModel` / `byAgent`; the three rows from the top NON-synthetic
+     `summary.contextConsumers.top` entries (`target`, `estTokens`, `carriedCost`); the lever
+     bound from `summary.highContextCost`; the grade from `summary.aiAssessment.rating` /
+     `.headline`; the path is what the renderer prints. Percentages are whole numbers; money
+     uses the report's usual precision. (`list` mode produces no detail — this skeleton is
+     detail-report only.)
    - Three things come from the model: the TOP TURNS prompt cell ("what this turn
      accomplished"), the TOP CONTEXT CONSUMERS target cell ("what this file/command/prompt was"),
      and the **"Spending less next time" assessment** (a 1–5 grade plus verdict-tagged
