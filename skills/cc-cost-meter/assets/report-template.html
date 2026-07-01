@@ -13,7 +13,8 @@
     HIGH_CTX_CALLS   summary.highContextCost.calls
     CONTEXT_RESETS   summary.contextResets
     PEAK_CONTEXT     summary.contextGrowth.peakContext → "Nk"
-    CONTEXT_TIMELINE inline SVG — one bar per main-session step (from calls[]), height = context size
+    CONTEXT_TIMELINE inline SVG — one bar per main-session step (from calls[]): tier-colored re-read base + hatched written cap, total height = context size; ↻ marks a cache rebuild
+    CACHE_REBUILD_CALLOUT  warning card under the chart when summary.cacheRebuilds.count > 0 (empty otherwise)
     CONTEXT_GROWTH_BAR inline SVG — horizontal bar, one segment per turn, width = context growth
     WHERE_IT_WENT_ROWS  one <tr> per components entry: <td>label</td><td>$cost</td><td><bar></td>
     CONSUMER_TOOL_ROWS  one <tr> per summary.contextConsumers.byTool entry (tool, count, est tokens, carried cost, share)
@@ -79,10 +80,17 @@
   svg .zone-mid{fill:var(--c-mid)} svg .zone-high{fill:var(--c-high)}
   svg .grid{stroke:#999} svg .grid-warn{stroke:var(--red)}
   svg .reset-line{stroke:var(--red)} svg .divider{stroke:var(--ink)}
+  /* Written cap = hatched slate (a one-time cache write), distinct from the solid
+     tier-colored re-read base. ↻ marks a step that re-wrote the whole window. */
+  svg .ctx-written{fill:url(#ctx-hatch)} svg .ctx-rebuild{fill:#3c4654;font-size:13px;
+    font-family:var(--font-head);cursor:help}
   .ctx-legend i.c-low{background:var(--c-low)} .ctx-legend i.c-mid{background:var(--c-mid)}
   .ctx-legend i.c-high{background:var(--c-high)} .ctx-legend i.c-user{background:var(--c-user)}
   .ctx-legend i.c-skill{background:var(--c-skill)} .ctx-legend i.c-orch{background:var(--c-orch)}
   .ctx-legend i.c-start{background:var(--c-start)} .ctx-legend i.c-dim{background:var(--c-dim)}
+  .ctx-legend i.ctx-written{background:repeating-linear-gradient(45deg,#5b6675 0 3px,#3c4654 3px 5px)}
+  .ctx-legend i.rebuild{background:transparent;border:0;width:auto;margin-right:5px;
+    color:#3c4654;font-style:normal;font-size:17px;line-height:1}
   * { box-sizing: border-box; }
   html { scroll-behavior:smooth; }
 
@@ -257,12 +265,18 @@
   .ctx-seg:hover { opacity:.7; }
   .ctx-bar, .ctx-seg { cursor:crosshair; }
   .ctx-legend i.reset { background:transparent; border:0; border-left:2px dashed var(--red); width:3px; }
+  /* Deterministic warning card under the chart (cache-rebuild advice). */
+  .callout { border:1px solid var(--frame); border-left:5px solid #cf9b0a; background:#f7eecb;
+    margin:14px 0 0; padding:0 0 12px; overflow-wrap:anywhere; }
+  .callout-h { font-family:var(--font-head); font-weight:700; font-size:15px; letter-spacing:.02em;
+    color:var(--ink); padding:11px 16px; background:#e9d08a; border-bottom:1px solid var(--frame); }
+  .callout p { margin:10px 16px 0; font-family:var(--font-body); font-size:16px; color:#222; }
 
   /* Floating hover tooltip styled as a catalog "sticker": white card, 1px black
      border, hard bevel (never a soft shadow), zero radius, yellow Helvetica-caps
      header. Follows the cursor; replaces the browser's slow native title popup. */
   .tip { position:fixed; top:0; left:0; z-index:100; pointer-events:none;
-    max-width:360px; background:var(--canvas); color:var(--ink);
+    max-width:520px; background:var(--canvas); color:var(--ink);
     border:1px solid var(--frame); box-shadow:4px 4px 0 #000;
     opacity:0; transition:opacity .08s ease-out; will-change:transform; }
   .tip.show { opacity:1; }
@@ -275,6 +289,11 @@
   .tip .tip-meta { font-family:var(--font-head); font-size:12px; color:#333; padding:6px 11px 0; }
   .tip .tip-b { font-family:var(--font-body); font-size:14.5px; line-height:1.4; color:#222;
     padding:7px 11px 10px; }
+  /* One source per line under "new in context", hanging-indented with a bullet so a
+     long command or message wraps under itself instead of colliding with the next. */
+  .tip .tip-src { font-family:var(--font-body); font-size:13.5px; line-height:1.35;
+    color:#222; padding:3px 0 0 18px; text-indent:-9px; word-break:break-word; }
+  .tip .tip-src::before { content:"• "; }
   .prompt { font-family:var(--font-body); color:#333; }
   /* Small-print notes under tables (estimate disclaimer, thinking headline). */
   p.note { font-family:var(--font-body); color:#333; font-size:13px; }
@@ -387,27 +406,29 @@
   </section>
 
   <h2 id="context" class="tint-olive">Context window over time</h2>
-  <p class="explain">One bar per step, left to right in time order. The height of a bar is how
-  full the conversation was at that moment, measured in tokens (roughly, pieces of words).
-  Because every step re-reads everything before it, <strong>taller bars cost more</strong>.
-  Green bars are a comfortable size (under 100k tokens). Amber is getting heavy. Red is past
-  the dashed 200k line, which is the expensive zone the "spent above 200k" card adds up. The
-  blue ticks under the bottom line show where your messages landed. When a bar suddenly drops
-  back to almost nothing, that is a /compact or a context clear emptying the conversation. The
-  healthy pattern is a zig-zag: fill up, clear, fill up again. One long climb that stays red
-  means every later step was paying the highest re-reading cost. Hover over any bar to see that
-  step's size, cost, and the message it was working on.</p>
+  <p class="explain">One bar per step, left to right in time order. The full height of a bar is
+  how big the conversation was at that moment, in tokens (roughly, pieces of words). Because every
+  step re-reads everything before it, <strong>taller bars cost more</strong>. Each bar has two
+  parts: a solid <strong>re-read</strong> base — context already cached, read back cheaply, colored
+  green / amber / red by size — and a hatched <strong>written</strong> cap on top: new material
+  cached that step. Normally the cap is thin. When it suddenly fills the whole bar, the prompt cache
+  expired (after a long idle gap) and that step had to re-write the entire window from scratch —
+  marked with a ↻ below. That is <em>not</em> the conversation shrinking; the height stays the same,
+  it just turns all-written. A dashed red line is the real thing: a /compact or clear where the
+  total actually dropped. The axis underneath shows minutes from the start, so you can see where the
+  long gaps were. Hover any bar for its split, cost, and the message it was working on.</p>
   {{CONTEXT_TIMELINE}}
   <div class="ctx-legend">
-    <span><i class="c-low"></i>under 100k (comfortable)</span>
-    <span><i class="c-mid"></i>100k to 200k (getting heavy)</span>
-    <span><i class="c-high"></i>above 200k (time to clear the conversation)</span>
+    <span><i class="c-low"></i>re-read, under 100k (comfortable)</span>
+    <span><i class="c-mid"></i>re-read, 100k to 200k (getting heavy)</span>
+    <span><i class="c-high"></i>re-read, above 200k (time to clear)</span>
+    <span><i class="ctx-written"></i>written this step (new cache)</span>
     <span><i class="c-user"></i>where your message landed</span>
-    <span><i class="c-dim"></i>a skill or helper started</span>
-    <span><i class="reset"></i>conversation cleared: the dashed line marks a point where the
-    conversation suddenly shrank, from a /compact, a manual clear, or the saved copy being rebuilt</span>
+    <span><i class="rebuild">↻</i>cache expired &amp; re-written (a long idle gap)</span>
+    <span><i class="reset"></i>conversation actually cleared (/compact or clear: the total dropped)</span>
   </div>
   <div id="ctx-readout">hover a bar to inspect a step</div>
+  {{CACHE_REBUILD_CALLOUT}}
 
   <h3>The same growth, grouped by message: who added what</h3>
   <p class="explain">The chart above uses many bars for a single message. This one is simpler:
@@ -595,13 +616,20 @@
 
   wire('.ctx-chart', 'ctx-readout', 'ctx-bar',
     function (d) {
-      return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.ctx) + ' context</div>' +
+      var srcs = d.source ? d.source.split(' · ') : [];
+      var lines = '';
+      for (var i = 0; i < srcs.length; i++) lines += '<div class="tip-src">' + esc(srcs[i]) + '</div>';
+      return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.total) + ' context</div>' +
         '<div class="tip-cost">' + esc(d.cost) + '</div>' +
-        (d.prompt ? '<div class="tip-b">serving: ' + esc(d.prompt) + '</div>' : '');
+        '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · +' + esc(d.mins) + ' from start</div>' +
+        (d.tools ? '<div class="tip-b">ran: ' + esc(d.tools) + '</div>' : '') +
+        (srcs.length ? '<div class="tip-b">new in context (+' + esc(d.written) + '):' + lines + '</div>' : '');
     },
     function (d) {
-      return 'step ' + d.step + ' · ' + d.ctx + ' context · ' + d.cost +
-        (d.prompt ? ' · serving: ' + d.prompt : '');
+      return 'step ' + d.step + ' · ' + d.total + ' context (' + d.cached + ' re-read + ' + d.written +
+        ' written) · ' + d.cost + ' · +' + d.mins + ' from start' +
+        (d.tools ? ' · ran: ' + d.tools : '') +
+        (d.source ? ' · new in context: ' + d.source : '');
     });
 
   wire('.ctx-growbar', 'grow-readout', 'ctx-seg',

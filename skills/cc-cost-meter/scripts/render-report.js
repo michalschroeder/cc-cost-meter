@@ -222,10 +222,82 @@ function skillRows(bySkill) {
 // summary.contextResetDropTokens; these defaults only cover older payloads.
 const HIGH_CONTEXT = 200000;
 const RESET_DROP = 100000;
-// Context size at one step = the call's cacheRead (re-read accumulated context).
-// SAME basis the data layer uses for summary.highContextCost and contextResets, so
-// the chart's tiers and reset lines never contradict the cards rendered beside them.
+// A step's context splits in two: `ctxOf` is the re-read base (the call's cacheRead —
+// cheap, the tier-colored base) and `writtenOf` is everything freshly cached + fresh
+// input that step (the expensive cap); together they sum to the real window size.
+// `ctxOf` is the SAME basis the data layer uses for summary.highContextCost and
+// contextResets, so the chart's tiers and reset lines never contradict the cards beside
+// them.
 const ctxOf = (c) => (c.tokens && c.tokens.cacheRead) || 0;
+const writtenOf = (c) => (c.tokens && (c.tokens.cacheWrite + c.tokens.input)) || 0;
+const totalCtxOf = (c) => ctxOf(c) + writtenOf(c);
+// Tool tally for a step: "Read ×2 · Bash · Edit" in first-seen order, ×N only when >1.
+const toolTally = (tools) => {
+  if (!tools || !tools.length) return '';
+  const n = new Map();
+  for (const t of tools) n.set(t, (n.get(t) || 0) + 1);
+  return [...n].map(([t, c]) => (c > 1 ? `${t} ×${c}` : t)).join(' · ');
+};
+// Tools whose target is a file path (basename'd); others keep the whole target.
+const PATH_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// A skill dispatch's name from its expansion prompt ("Base directory for this skill:
+// /…/<name> …") or a typed slash command ("/name …"); null otherwise. Mirrors
+// session-detail's skillName, but the renderer stays decoupled from the lib (it
+// consumes only the JSON contract).
+const skillFromPrompt = (text) => {
+  if (!text) return null;
+  const base = /^Base directory for this skill:\s*(\S+)/.exec(text);
+  if (base) return base[1].replace(/\/+$/, '').split(/[\\/]/).pop();
+  const slash = /^\/([A-Za-z0-9_:-]+)(\s|$)/.exec(text);
+  return slash ? slash[1] : null;
+};
+// One context source, classified for the "new in context" list. A user message that
+// is a skill dispatch → "skill: <name>"; otherwise the message text. A tool result →
+// "<Tool> <file>" for path tools, "asked: <question>" for AskUserQuestion, else
+// "<Tool>: <target>". Caps are generous; the styled tooltip wraps at its max-width.
+// Image tallies are handled by the caller (their own line), not here.
+const sourceLabel = (s) => {
+  if (!s) return '';
+  if (s.tool === 'user-prompt') {
+    const text = String(s.target || '');
+    const sk = skillFromPrompt(text);
+    if (sk) return `skill: ${sk}`;
+    const msg = truncate(text, 1000);
+    return msg ? `your message: ${msg}` : 'your message';
+  }
+  if (s.tool === 'AskUserQuestion') {
+    const q = truncate(s.target, 160);
+    return q ? `asked: ${q}` : 'asked a question';
+  }
+  const t = String(s.target || '');
+  if (PATH_TOOLS.has(s.tool)) return `${s.tool} ${truncate(t.split(/[\\/]/).pop() || t, 80)}`.trim();
+  return t ? `${s.tool}: ${truncate(t, 200)}` : s.tool;
+};
+// The labels that enter the "new in context" list for a step: each source via
+// sourceLabel, plus a leading "N image(s) pasted" line when a user message carried
+// pasted images (a real, often heavy context cost that's easy to miss in the prose).
+const sourceLabels = (sources) => {
+  const out = [];
+  for (const s of (sources || [])) {
+    if (s && s.tool === 'user-prompt') {
+      const imgs = (String(s.target || '').match(/\[Image: source:/g) || []).length;
+      if (imgs) out.push(`${imgs} image${imgs > 1 ? 's' : ''} pasted`);
+    }
+    const lbl = sourceLabel(s);
+    if (lbl) out.push(lbl);
+  }
+  return out;
+};
+// Minutes between two ISO timestamps; null when either is missing/unparseable.
+const minsBetween = (a, b) => {
+  const t0 = Date.parse(a), t1 = Date.parse(b);
+  return isNaN(t0) || isNaN(t1) ? null : (t1 - t0) / 60000;
+};
+const fmtMins = (m) => {
+  if (m == null) return '—';
+  const r = Math.round(m);
+  return r >= 60 ? `${Math.floor(r / 60)}h${String(r % 60).padStart(2, '0')}m` : `${r}m`;
+};
 // Chart colors are CSS classes defined once in the template's <style> (next to
 // the legend swatches, so chart and legend can't diverge).
 const tierClass = (v, highCtx, resetDrop) => (v >= highCtx ? 'c-high' : v >= resetDrop ? 'c-mid' : 'c-low');
@@ -234,18 +306,20 @@ const KIND_CLASS = {
   'session-start': 'c-start', overhead: 'c-dim',
 };
 
-// Context-window timeline: one SVG bar per main-session step (subagents run in
-// their own context and are excluded). Height = context size at that step,
-// colored by the high-context tier. Turn-start ticks under the axis, dashed
-// reset line on a context drop > resetDrop. Bars carry data-* attributes for
-// the template's hover readout plus a native <title> tooltip; everything
-// user-derived is escaped.
+// Context-window timeline: one bar per main-session step (subagents run in their own
+// context and are excluded). Each bar is two stacked segments — a tier-colored CACHED
+// base (re-read context) and a hatched-slate WRITTEN cap (freshly cached + fresh input
+// that step) — so total height is the real window size. A cache rebuild then keeps its
+// height but turns almost all-written (no fake drop); a real /compact drops the total
+// and draws the dashed reset line. X carries time: minutes-from-start labels along the
+// axis, a ⟳ marker under any step whose cache expired and was re-written. Bars carry
+// data-* for the hover readout; everything user-derived is escaped.
 function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET_DROP) {
   const main = (calls || []).filter((c) => c.isMain);
   if (!main.length) return '<p class="prompt">no per-call data in this payload — re-run analyze.js to regenerate</p>';
-  const W = 860, H = 210, padL = 44, padR = 6, padT = 10, padB = 22;
+  const W = 860, H = 224, padL = 44, padR = 6, padT = 10, padB = 36;
   const chartW = W - padL - padR, chartH = H - padT - padB, baseY = padT + chartH;
-  const peak = Math.max(...main.map(ctxOf), 1);
+  const peak = Math.max(...main.map(totalCtxOf), 1);
   // Keep a fixed minimum ceiling above 200k so the red danger zone is always a
   // real visible band (not a sliver) even when a session never gets there; tall
   // sessions still scale to their own peak.
@@ -256,7 +330,11 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
   // Key on turnIndex, not prompt text: two distinct turns with identical text
   // (e.g. "continue" twice) stay separate ticks.
   const kindOf = new Map((turns || []).map((t) => [t.turnIndex, t.kind]));
+  const t0 = (main.find((c) => c.ts) || {}).ts || null; // session start
   const parts = [];
+  // Diagonal-hatch fill for the "written this step" cap (referenced by .ctx-written).
+  parts.push('<defs><pattern id="ctx-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+    '<rect width="5" height="5" fill="#5b6675"/><line x1="0" y1="0" x2="0" y2="5" stroke="#3c4654" stroke-width="2"/></pattern></defs>');
   // Faint severity zones painted behind everything: green 0–100k, amber 100–200k,
   // red above 200k. They make all three tier colors legible even on a low session,
   // so the bar colors always read against a constant backdrop.
@@ -273,27 +351,90 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
     parts.push(`<line x1="${padL}" y1="${gy}" x2="${W - padR}" y2="${gy}" class="${warn ? 'grid-warn' : 'grid'}" stroke-dasharray="4 4"/>`);
     parts.push(`<text x="2" y="${(Number(gy) + 3).toFixed(1)}" class="ctx-axis">${g / 1000}k</text>`);
   }
-  let prevTurn = null, prevCtx = 0;
+  let prevTurn = null, prevTotal = 0, prevCached = 0;
   main.forEach((c, i) => {
-    const v = ctxOf(c);
+    const cached = ctxOf(c), written = writtenOf(c), total = cached + written;
     const xv = xAt(i).toFixed(1);
     const step = i + 1; // main-session step ordinal (matches summary.mainSteps / thinking seq)
-    if (i > 0 && prevCtx - v > resetDrop) {
-      parts.push(`<line x1="${xv}" y1="${padT}" x2="${xv}" y2="${baseY}" class="reset-line" stroke-dasharray="2 3"><title>context dropped ${esc(compactTokens(prevCtx))} → ${esc(compactTokens(v))} — /compact, context clear, or a cache rebuild</title></line>`);
+    const mins = t0 && c.ts ? minsBetween(t0, c.ts) : null;
+    const gapMin = i > 0 && t0 && c.ts && main[i - 1].ts ? minsBetween(main[i - 1].ts, c.ts) : null;
+    // A real reset: the TOTAL window dropped. A cache REBUILD: the re-read part
+    // collapsed but the total held — same split the data layer uses for contextResets
+    // vs cacheRebuilds, so chart and cards agree.
+    if (i > 0 && prevTotal - total > resetDrop) {
+      parts.push(`<line x1="${xv}" y1="${padT}" x2="${xv}" y2="${baseY}" class="reset-line" stroke-dasharray="2 3"><title>context dropped ${esc(compactTokens(prevTotal))} → ${esc(compactTokens(total))} — a /compact or context clear</title></line>`);
+    } else if (i > 0 && prevCached - cached > resetDrop) {
+      parts.push(`<text x="${xv}" y="${(baseY + 19).toFixed(1)}" class="ctx-rebuild" text-anchor="middle">↻<title>cache rebuilt: ${esc(fmtMins(gapMin))} idle gap expired the prompt cache, so this step re-wrote the whole ${esc(compactTokens(total))} window (cost +${esc(money(c.cacheWriteCost || 0))}). Cache holds ~1h on a subscription, ~5min on API keys.</title></text>`);
     }
     if (c.prompt && c.turnIndex !== prevTurn) {
       const tick = kindOf.get(c.turnIndex) === 'user' ? 'c-user' : 'c-dim';
       parts.push(`<rect class="ctx-turn ${tick}" x="${xv}" y="${baseY + 3}" width="${Math.max(barW, 2).toFixed(2)}" height="5"><title>${esc(truncate(c.prompt, 110))}</title></rect>`);
       prevTurn = c.turnIndex;
     }
-    const h = Math.max(baseY - yAt(v), 0.5);
-    parts.push(`<rect class="ctx-bar ${tierClass(v, highCtx, resetDrop)}" x="${xv}" y="${yAt(v).toFixed(1)}" width="${barW.toFixed(2)}" height="${h.toFixed(1)}"` +
-      ` data-step="${esc(step)}" data-ctx="${esc(compactTokens(v))}" data-cost="${esc(money(c.cost))}" data-prompt="${esc(truncate(c.prompt || '', 110))}">` +
-      `<title>step ${esc(step)} · ${esc(compactTokens(v))} context · ${esc(money(c.cost))}</title></rect>`);
-    prevCtx = v;
+    const toolsStr = toolTally(c.tools);
+    const srcLabels = sourceLabels(c.contextSources);
+    // Attribute the part of `written` the tracked sources (user msgs + tool results)
+    // don't cover: the model's own prior reply being committed to the cache — or, on
+    // the first step, the system prompt + tool defs. Only when it's a real share, so a
+    // one-word "yes" stops looking like it cost 2k, without adding noise to a step a
+    // big file read already explains.
+    if (typeof c.contextSourceTokens === 'number') {
+      const remainder = written - c.contextSourceTokens;
+      if (remainder >= 300 && remainder * 4 >= written) {
+        const what = i === 0 ? 'session startup (system prompt + tool defs)' : "the model's previous reply";
+        srcLabels.unshift(`${what} (~${compactTokens(remainder)})`);
+      }
+    }
+    const sourcesStr = srcLabels.join(' · ');
+    const dataBase = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
+      ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"`;
+    const data = dataBase +
+      (toolsStr ? ` data-tools="${esc(toolsStr)}"` : '') +
+      (sourcesStr ? ` data-source="${esc(sourcesStr)}"` : '');
+    // Written cap on top (yMax..yAt(total) down to yAt(cached)), cached base below it.
+    const yTotal = yAt(total), yCached = yAt(cached);
+    const hWritten = Math.max(yCached - yTotal, 0);
+    if (hWritten > 0.2) {
+      parts.push(`<rect class="ctx-bar ctx-written" x="${xv}" y="${yTotal.toFixed(1)}" width="${barW.toFixed(2)}" height="${hWritten.toFixed(1)}"${dataBase}/>`);
+    }
+    const hCached = Math.max(baseY - yCached, 0.5);
+    parts.push(`<rect class="ctx-bar ${tierClass(cached, highCtx, resetDrop)}" x="${xv}" y="${yCached.toFixed(1)}" width="${barW.toFixed(2)}" height="${hCached.toFixed(1)}"${data}>` +
+      `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · +${esc(fmtMins(mins))}` +
+      `${toolsStr ? ` — ran ${esc(toolsStr)}` : ''}${sourcesStr ? `; new in context: ${esc(sourcesStr)}` : ''}</title></rect>`);
+    prevTotal = total; prevCached = cached;
   });
   parts.push(`<line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" class="grid"/>`);
+  // Minutes-from-start labels at five points along the axis (skip when no timestamps).
+  if (t0) {
+    for (let q = 0; q <= 4; q++) {
+      const i = Math.round((q / 4) * (main.length - 1));
+      const m = main[i] && main[i].ts ? minsBetween(t0, main[i].ts) : null;
+      if (m == null) continue;
+      const anchor = q === 0 ? 'start' : q === 4 ? 'end' : 'middle';
+      parts.push(`<text x="${xAt(i).toFixed(1)}" y="${(baseY + 31).toFixed(1)}" class="ctx-axis" text-anchor="${anchor}">+${esc(fmtMins(m))}</text>`);
+    }
+  }
   return `<svg class="ctx-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="context window size per step">${parts.join('')}</svg>`;
+}
+
+// "once" / "N times" — how many cache rebuilds, in prose (shared by the callout and card).
+const rebuildTimes = (n) => (n === 1 ? 'once' : `${n} times`);
+
+// Standalone warning card rendered under the chart when the prompt cache expired and was
+// rebuilt at least once. Deterministic (computed from summary.cacheRebuilds), so it's
+// always present when the data shows it, independent of the AI assessment.
+function cacheRebuildCallout(summary) {
+  const cr = (summary && summary.cacheRebuilds) || {};
+  if (!cr.count) return '';
+  return `<div class="callout callout-warn">
+    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache ${esc(rebuildTimes(cr.count))}</div>
+    <p>The prompt cache holds the conversation so each step re-reads it cheaply. It expires after
+    an idle gap — about <strong>1 hour on a Claude subscription</strong> (5 minutes on API-key usage).
+    When that happens the next step has to re-write the whole window from scratch, which cost roughly
+    <strong>${esc(money(cr.extraCost))}</strong> here and bought nothing new. Those are the ↻ marks on
+    the chart. To avoid it: <strong>/compact or /clear at a natural break</strong> before stepping away,
+    or split a very long session into shorter ones.</p>
+  </div>`;
 }
 
 // Grouped horizontal context bar: consecutive main-session steps serving the same
@@ -400,14 +541,28 @@ const clampRating = (v) => {
 function buildAssessment(detail) {
   const s = detail.summary || {};
   const ai = s.aiAssessment;
-  if (ai && typeof ai === 'object' && (Array.isArray(ai.cards) && ai.cards.length || ai.rating != null)) {
-    const cards = (Array.isArray(ai.cards) ? ai.cards : []).map((c) => ({
-      verdict: normVerdict(c.verdict), title: String(c.title || ''),
-      what: String(c.what || ''), why: String(c.why || ''), how: String(c.how || ''),
-    }));
-    return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards };
+  const cards = (ai && Array.isArray(ai.cards) ? ai.cards : []).map((c) => ({
+    verdict: normVerdict(c.verdict), title: String(c.title || ''),
+    what: String(c.what || ''), why: String(c.why || ''), how: String(c.how || ''),
+  }));
+  // Deterministic, data-derived card prepended whenever the prompt cache was rebuilt —
+  // surfaced here too (not just the chart callout) so the "Spending less next time" grade
+  // always names the long-session-cache-expiry cost, regardless of what the AI wrote.
+  const cr = s.cacheRebuilds || {};
+  if (cr.count) {
+    cards.unshift({
+      verdict: 'warn',
+      title: 'Prompt cache expired mid-session',
+      what: `The session was idle long enough that the prompt cache expired and had to be re-written ` +
+        `${rebuildTimes(cr.count)}, costing about ${money(cr.extraCost)} extra.`,
+      why: 'The cache lets every step re-read the conversation cheaply. After an idle gap (~1h on a ' +
+        'Claude subscription, ~5min on API keys) it expires, and the next step pays to re-cache the whole window.',
+      how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
+    });
   }
-  return { rating: null, headline: '', cards: [] };
+  const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null);
+  if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards };
+  return { rating: null, headline: '', cards };
 }
 
 // The 1–5 grade badge that sits at the very top of the report. Empty when unrated.
@@ -476,6 +631,7 @@ function render(detail, template) {
     CONTEXT_RESETS: esc(s.contextResets || 0),
     PEAK_CONTEXT: compactTokens(cg.peakContext),
     CONTEXT_TIMELINE: contextTimeline(detail.calls, detail.turns, highCtx, resetDrop),
+    CACHE_REBUILD_CALLOUT: cacheRebuildCallout(s),
     CONTEXT_GROWTH_BAR: contextGrowthBar(detail.calls, detail.turns, resetDrop, s.sessionBaselineTokens),
     WHERE_IT_WENT_ROWS: whereItWentRows(detail.components || {}, detail.totalCost),
     CONSUMER_TOOL_ROWS: consumerToolRows(s.contextConsumers),

@@ -54,6 +54,11 @@ function toolTarget(name, input) {
     case 'WebFetch': t = first('url'); break;
     case 'WebSearch': t = first('query'); break;
     case 'Skill': t = first('skill'); break;
+    case 'AskUserQuestion': {
+      const q = Array.isArray(input.questions) ? input.questions[0] : null;
+      t = (q && typeof q === 'object') ? String(q.question || q.header || '') : '';
+      break;
+    }
     default: t = first('file_path', 'path', 'command', 'pattern', 'url', 'query', 'description', 'prompt');
   }
   return t.replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -117,7 +122,7 @@ function parseCalls(file, trackPrompts, consumers) {
       const p = promptText(o);
       if (p) {
         current = p; turn++;
-        if (consumers) consumers.push({ tool: 'user-prompt', target: p.slice(0, 200), estTokens: Math.round(p.length / CHARS_PER_TOKEN), afterStep: order.length });
+        if (consumers) consumers.push({ tool: 'user-prompt', target: p.slice(0, 1000), estTokens: Math.round(p.length / CHARS_PER_TOKEN), afterStep: order.length });
       }
     }
     if (consumers) {
@@ -287,7 +292,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
         model: call.model, ts: call.ts || null,
         prompt: d.isMain ? call.prompt : null,       // subagent calls aren't main-session turns
         turnIndex: d.isMain ? call.turn : null,      // which main-session turn this call served
-        cost: b.total, outCost: b.output, cacheReadCost: b.cacheRead,
+        cost: b.total, outCost: b.output, cacheReadCost: b.cacheRead, cacheWriteCost: b.cacheWrite,
         tokens, tools: call.tools.slice(),
         outParts: call.outParts,
       });
@@ -345,6 +350,26 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     if (!cur || e.estTokens > cur.estTokens) triggerByIdx.set(e.afterStep, e);
   }
   summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx);
+  // Top-3 things that landed in context right before each main call — what got
+  // newly written into that step — attached per call for the chart tooltip. Same
+  // afterStep→call mapping triggerByIdx/mainIdx already use; estTokens only ranks
+  // here and is intentionally not serialized (the tooltip shows names, no numbers).
+  // contextSourceTokens is the est. size of ALL such tracked inflow (user msgs +
+  // tool results), so a renderer can attribute the rest of `written` to the model's
+  // own prior reply — otherwise a one-word "yes" looks like it cost 2k.
+  const sourcesByIdx = new Map();
+  for (const e of consumerEvents) {
+    const arr = sourcesByIdx.get(e.afterStep) || [];
+    arr.push(e); sourcesByIdx.set(e.afterStep, arr);
+  }
+  mainCalls.forEach((c, j) => {
+    const evs = sourcesByIdx.get(mainIdx[j]);
+    if (evs && evs.length) {
+      c.contextSources = evs.slice().sort((a, b) => b.estTokens - a.estTokens)
+        .slice(0, 3).map((e) => ({ tool: e.tool, target: e.target }));
+      c.contextSourceTokens = evs.reduce((a, e) => a + (e.estTokens || 0), 0);
+    }
+  });
   // Cost per skill: the turns each skill dispatch drove (its expansion prompt or
   // /slash command), summed by extracted skill name. Only the dispatch's own
   // turns — later work the skill influenced is attributed to those prompts.
@@ -584,8 +609,21 @@ function buildSummary(main, turns) {
   const tools = new Map();
   for (const c of main) for (const tn of c.tools) tools.set(tn, (tools.get(tn) || 0) + 1);
   const hi = main.filter((c) => c.tokens.cacheRead > HIGH_CONTEXT);
-  let resets = 0;
-  for (let i = 1; i < cr.length; i++) if (cr[i - 1] - cr[i] > RESET_DROP) resets++;
+  // True context size per step = re-read + freshly written + fresh input (the whole
+  // prompt). Two step-to-step events look alike in the cacheRead curve but aren't:
+  //  - a RESET (a real /compact or clear) drops the TOTAL itself, and stays low;
+  //  - a cache REBUILD collapses the re-read part (cache expired) yet the total holds
+  //    — the window was re-written into a fresh cache, not cleared.
+  // Splitting on the total drop keeps the rebuild out of the reset count and bills its
+  // extra cost as the cacheWrite spent re-caching what was already there.
+  const tot = main.map((c) => c.tokens.cacheRead + c.tokens.cacheWrite + c.tokens.input);
+  let resets = 0, rebuildCount = 0, rebuildExtraCost = 0;
+  for (let i = 1; i < cr.length; i++) {
+    const totalDropped = tot[i - 1] - tot[i] > RESET_DROP;
+    const cacheCollapsed = cr[i - 1] - cr[i] > RESET_DROP;
+    if (totalDropped) resets++;
+    else if (cacheCollapsed) { rebuildCount++; rebuildExtraCost += main[i].cacheWriteCost || 0; }
+  }
   const f = main.length ? main[0].tokens : null;
   return {
     durationMs,
@@ -600,6 +638,10 @@ function buildSummary(main, turns) {
     highContextCost: { thresholdTokens: HIGH_CONTEXT, calls: hi.length, cost: hi.reduce((a, c) => a + c.cost, 0) },
     contextResets: resets,
     contextResetDropTokens: RESET_DROP,
+    // Prompt cache expiring then being re-written (long idle gap > cache TTL: ~1h on a
+    // Claude subscription, ~5min on API keys). count = how many steps re-cached the
+    // whole window; extraCost = the cacheWrite $ that bought nothing new.
+    cacheRebuilds: { count: rebuildCount, extraCost: rebuildExtraCost },
   };
 }
 

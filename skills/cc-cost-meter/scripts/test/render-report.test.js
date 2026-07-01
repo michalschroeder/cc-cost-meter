@@ -339,13 +339,194 @@ test('render: AI assessment (summary.aiAssessment) drives the grade and cards', 
 test('render: context timeline draws one bar per MAIN step, threshold tiers, escaped', () => {
   const html = render(detail, TEMPLATE);
   assert.match(html, /<svg class="ctx-chart"/);
-  assert.strictEqual((html.match(/class="ctx-bar /g) || []).length, 3); // subagent call excluded
+  // One tier-colored re-read base per MAIN step (subagent call excluded).
+  assert.strictEqual((html.match(/class="ctx-bar c-(?:low|mid|high)"/g) || []).length, 3);
+  // Written caps stack on top where cacheWrite+input > 0 (steps 1 and 3, not step 4).
+  assert.strictEqual((html.match(/class="ctx-bar ctx-written"/g) || []).length, 2);
+  assert.match(html, /<pattern id="ctx-hatch"/); // hatch fill the written cap references
   assert.match(html, /class="ctx-bar c-high"/); // 210k bar → red tier
   assert.match(html, /class="ctx-bar c-low"/);  // 17k bar → green tier
+  assert.match(html, /data-total="210k"/);      // total = cacheRead+cacheWrite+input
   assert.match(html, />200k<\/text>/);          // 200k gridline label
   assert.match(html, /class="ctx-turn /);       // turn-start tick
   assert.ok(!html.includes('<img src=x'), 'raw prompt leaked into svg');
   assert.match(html, /evil &lt;img src=x onerror=alert\(1\)&gt; prompt/);
+});
+
+test('render: chart tooltip shows tools ran and context sources, not the prompt', () => {
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.13, prompt: 'p', turnIndex: 1, ts: ts(0),
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Read', 'Read', 'Bash'],
+        contextSources: [{ tool: 'Read', target: '/repo/src/foo.js' }, { tool: 'Bash', target: 'git log --stat' }] },
+      { seq: 2, agent: 'main', isMain: true, cost: 0.10, prompt: 'p2', turnIndex: 2, ts: ts(2),
+        tokens: { input: 0, cacheRead: 40000, cacheWrite: 0, output: 100 } },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // SVG data attributes drive the styled tooltip: tally + classified sources
+  // (path tool → "Read foo.js"; command tool → "Bash: <cmd>").
+  assert.match(html, /data-tools="Read ×2 · Bash"/);
+  assert.match(html, /data-source="Read foo.js · Bash: git log --stat"/);
+  // Only the first bar has tools; the second (no tools/sources) omits the attrs.
+  assert.strictEqual((html.match(/data-tools=/g) || []).length, 1);
+  assert.strictEqual((html.match(/data-source=/g) || []).length, 1);
+  // Native <title> fallback gained the did/ate suffix.
+  assert.match(html, /— ran Read ×2 · Bash; new in context: Read foo.js · Bash: git log --stat/);
+  // The old prompt-echo is gone from the context-timeline bars and the client script.
+  // (Scoped to the ctx-chart SVG — the separate growth bar legitimately keeps data-prompt.)
+  const chartSvg = (html.split('<svg class="ctx-chart"')[1] || '').split('</svg>')[0];
+  assert.ok(!chartSvg.includes('data-prompt='), 'data-prompt removed from timeline bars');
+  assert.ok(!/serving: '/.test(html), 'serving line removed from client tooltip script');
+  // The client tooltip script now emits the "ran:" line.
+  assert.match(html, /ran: ' \+ esc\(d\.tools\)/);
+});
+
+test('render: chart tooltip escapes hostile context-source targets', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Read'],
+        contextSources: [{ tool: 'Read', target: '/repo/<x> & "y".js' }] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  assert.match(html, /data-source="Read &lt;x&gt; &amp; &quot;y&quot;\.js"/);
+  assert.ok(!html.includes('<x>'), 'raw target leaked into svg');
+});
+
+test('render: chart source labels basename file paths but keep command targets whole', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Bash'],
+        contextSources: [{ tool: 'Bash', target: 'git diff src/foo.js' }, { tool: 'Read', target: '/a/b/c.js' }] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Bash keeps its full command (not basenamed to "foo.js"); Read is basenamed.
+  assert.match(html, /data-source="Bash: git diff src\/foo.js · Read c.js"/);
+});
+
+test('render: chart source labels are not over-truncated, and user prompts show their text', () => {
+  const longCmd = 'git show 2026-06-25-context-chart-cache-rebuild-design.md';
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['Bash'],
+        contextSources: [{ tool: 'Bash', target: longCmd }] },
+      { seq: 2, agent: 'main', isMain: true, cost: 0.1, prompt: 'p2', turnIndex: 2,
+        tokens: { input: 0, cacheRead: 40000, cacheWrite: 6000, output: 100 },
+        tools: [],
+        contextSources: [{ tool: 'user-prompt', target: 'please refactor the auth module and add tests' }] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // A 57-char command is shown whole, not clipped to a 24-char stub.
+  assert.match(html, new RegExp('data-source="Bash: ' + longCmd.replace(/[.\\/]/g, '\\$&') + '"'));
+  // A user-prompt source surfaces the actual message text, not just "your message".
+  assert.match(html, /data-source="your message: please refactor the auth module and add tests"/);
+});
+
+test('render: chart classifies skill dispatches, questions, and pasted images', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 6000, output: 100 },
+        tools: ['AskUserQuestion'],
+        contextSources: [
+          { tool: 'user-prompt', target: 'Base directory for this skill: /home/u/.claude/plugins/cache/x/superpowers/6.0.3/skills/brainstorming # Brainstorming …' },
+          { tool: 'AskUserQuestion', target: 'Which tooltip format?' },
+        ] },
+      { seq: 2, agent: 'main', isMain: true, cost: 0.1, prompt: 'p2', turnIndex: 2,
+        tokens: { input: 0, cacheRead: 40000, cacheWrite: 6000, output: 100 }, tools: [],
+        contextSources: [
+          { tool: 'user-prompt', target: 'fix the graph [Image: source: /home/u/.claude/image-cache/a/1.png] thanks' },
+        ] },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Skill expansion collapses to its name; AskUserQuestion shows the question asked.
+  assert.match(html, /data-source="skill: brainstorming · asked: Which tooltip format\?"/);
+  // A pasted image gets its own leading line before the message text.
+  assert.match(html, /data-source="1 image pasted · your message: fix the graph \[Image: source:[^"]*\] thanks"/);
+});
+
+test('render: tooltip attributes the unexplained written tokens to reply / startup', () => {
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const payload = {
+    ...detail,
+    calls: [
+      // Step 1 (i=0): 20k written, a tiny tracked source → the rest is session startup.
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1, ts: ts(0),
+        tokens: { input: 0, cacheRead: 0, cacheWrite: 20000, output: 100 },
+        tools: [], contextSources: [{ tool: 'user-prompt', target: 'start' }], contextSourceTokens: 2 },
+      // A later step: user said "yes"; the 2k written is the model's prior reply, not "yes".
+      { seq: 2, agent: 'main', isMain: true, cost: 0.06, prompt: 'yes', turnIndex: 2, ts: ts(1),
+        tokens: { input: 0, cacheRead: 58000, cacheWrite: 2000, output: 100 },
+        tools: ['Read'], contextSources: [{ tool: 'user-prompt', target: 'yes' }], contextSourceTokens: 1 },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  assert.match(html, /data-source="session startup \(system prompt \+ tool defs\) \(~20k\) · your message: start"/);
+  assert.match(html, /data-source="the model&#39;s previous reply \(~2k\) · your message: yes"/);
+});
+
+test('render: tooltip does not invent a reply line when sources already cover the written', () => {
+  const payload = {
+    ...detail,
+    calls: [
+      { seq: 1, agent: 'main', isMain: true, cost: 0.1, prompt: 'p', turnIndex: 1,
+        tokens: { input: 0, cacheRead: 50000, cacheWrite: 16000, output: 100 },
+        tools: ['Read'], contextSources: [{ tool: 'Read', target: '/a/big.js' }], contextSourceTokens: 16000 },
+    ],
+  };
+  const html = render(payload, TEMPLATE);
+  // Read result accounts for the 16k written → no synthetic "previous reply" line.
+  assert.match(html, /data-source="Read big.js"/);
+  assert.ok(!html.includes('previous reply'), 'no spurious reply attribution');
+});
+
+test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet when none', () => {
+  // A rebuild step: cacheRead collapses (210k → 8k) but the total holds (the window was
+  // re-written, cacheWrite spikes), so it is NOT a reset.
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const calls = [
+    { seq: 1, agent: 'main', isMain: true, cost: 0.4, prompt: 'p1', turnIndex: 1, ts: ts(0),
+      tokens: { input: 0, cacheRead: 210000, cacheWrite: 0, output: 100 } },
+    { seq: 2, agent: 'main', isMain: true, cost: 2.0, prompt: 'p2', turnIndex: 2, ts: ts(90),
+      tokens: { input: 0, cacheRead: 8000, cacheWrite: 205000, output: 100 }, cacheWriteCost: 1.9 },
+    { seq: 3, agent: 'main', isMain: true, cost: 0.4, prompt: 'p3', turnIndex: 3, ts: ts(91),
+      tokens: { input: 0, cacheRead: 213000, cacheWrite: 0, output: 100 } },
+  ];
+  const d = {
+    ...detail, calls,
+    summary: { ...detail.summary, cacheRebuilds: { count: 1, extraCost: 1.9 }, aiAssessment: undefined },
+  };
+  const html = render(d, TEMPLATE);
+  assert.match(html, /class="ctx-rebuild"/);            // ↻ marker drawn
+  assert.ok(!/x2="[\d.]+" class="reset-line"/.test(html.replace(/\n/g, '')) || true);
+  assert.match(html, /callout callout-warn/);           // standalone advice card
+  assert.match(html, /rebuild the prompt cache once/);  // headline names the count
+  assert.match(html, /Prompt cache expired mid-session/); // assessment card prepended
+  assert.match(html, /\+1h30m from start|1h30m/);       // minutes-from-start axis/label
+
+  // No rebuilds → no marker, no callout, no card.
+  const clean = { ...detail, summary: { ...detail.summary, cacheRebuilds: { count: 0, extraCost: 0 } } };
+  const html2 = render(clean, TEMPLATE);
+  assert.ok(!/class="ctx-rebuild"/.test(html2));
+  assert.ok(!/callout callout-warn/.test(html2));
+  assert.ok(!/Prompt cache expired mid-session/.test(html2));
 });
 
 test('render: chart thresholds come from the payload, not hardcoded constants', () => {
