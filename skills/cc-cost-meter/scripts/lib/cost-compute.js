@@ -31,7 +31,8 @@ const ZERO_BREAKDOWN = Object.freeze({ input: 0, output: 0, cacheWrite: 0, cache
 // `costs` is the resolved per-token rate object or null (unknown/local → all 0).
 // Fast mode scales the whole call; >200K prompt switches the four token rates to
 // the model's `above200k` premium tier when defined; the 1-hour cache-write
-// premium is `cacheWrite × 1.6`.
+// premium is the model's `cacheWrite1h` rate when priced, else `cacheWrite × 1.6`
+// (Anthropic's 2×/1.25× ratio).
 function calculateCostBreakdown(usage, costs) {
   if (!costs || !usage) return ZERO_BREAKDOWN;
   const { fiveMinute, oneHour } = extractCacheCreation(usage);
@@ -43,7 +44,8 @@ function calculateCostBreakdown(usage, costs) {
   const webReq = num(usage.server_tool_use && usage.server_tool_use.web_search_requests);
   const input = mult * inputTokens * rates.input;
   const output = mult * num(usage.output_tokens) * rates.output;
-  const cacheWrite = mult * (fiveMinute * rates.cacheWrite + oneHour * rates.cacheWrite * 1.6);
+  const cacheWrite1h = rates.cacheWrite1h != null ? rates.cacheWrite1h : rates.cacheWrite * 1.6;
+  const cacheWrite = mult * (fiveMinute * rates.cacheWrite + oneHour * cacheWrite1h);
   const cacheRead = mult * cacheReadTokens * rates.cacheRead;
   const web = mult * webReq * costs.webSearch;
   return { input, output, cacheWrite, cacheRead, web, total: input + output + cacheWrite + cacheRead + web };

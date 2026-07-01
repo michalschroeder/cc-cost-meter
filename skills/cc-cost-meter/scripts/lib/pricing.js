@@ -28,13 +28,20 @@ function buildMap(rawObj) {
     if (input == null || output == null) continue;
     const cacheWrite = sanitizeRate(e.cache_creation_input_token_cost);
     const cacheRead = sanitizeRate(e.cache_read_input_token_cost);
+    // 1-hour-TTL cache-write rate: LiteLLM's field when present, else calculateCost
+    // falls back to cacheWrite × 1.6 (Anthropic's 2×/1.25× ratio).
+    const cacheWrite1h = sanitizeRate(e.cache_creation_input_token_cost_above_1hr);
     const val = {
       input, output,
       cacheWrite: cacheWrite == null ? input * 1.25 : cacheWrite,
       cacheRead: cacheRead == null ? input * 0.1 : cacheRead,
+      // No pricing source publishes a fast-mode rate, so this stays 1 and
+      // `usage.speed === 'fast'` calls are priced at normal rates — a known
+      // undercount if fast mode carries a premium.
       fastMultiplier: 1,
       webSearch: 0.01,
     };
+    if (cacheWrite1h != null) val.cacheWrite1h = cacheWrite1h;
     // Long-context (>200K input) premium tier. Anthropic charges higher rates when
     // a request's input exceeds 200K tokens (the 1M-context tier). Captured only
     // when present; each field falls back to its base rate. calculateCost selects
@@ -87,7 +94,8 @@ function hashMap(map) {
     const v = map[k];
     const b = v.above200k;
     const big = b ? `|${b.input},${b.output},${b.cacheWrite},${b.cacheRead}` : '';
-    h.update(`${k}:${v.input},${v.output},${v.cacheWrite},${v.cacheRead}${big}`);
+    const cw1h = v.cacheWrite1h != null ? `|1h:${v.cacheWrite1h}` : '';
+    h.update(`${k}:${v.input},${v.output},${v.cacheWrite},${v.cacheRead}${big}${cw1h}`);
   }
   return h.digest('hex').slice(0, 12);
 }

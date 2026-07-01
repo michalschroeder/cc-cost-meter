@@ -70,15 +70,16 @@ function analysisPayload(detail, id, ts, title, recap) {
     unpricedModels: detail.unpricedModels,
     legend:
       'Cost ≈ context-size × steps, recomputed from raw tokens × LiteLLM prices (not Claude\'s reported cost). ' +
+      'Dollars are API-equivalent value — a subscription (Pro/Max) user did not marginally pay them. ' +
       'tokens.cacheRead = re-reading accumulated context and is the dominant driver; tokens.input (fresh) is usually negligible. ' +
       'turns and calls are in EXECUTION order. steps (top level) = total billed assistant calls incl. subagents; summary.mainSteps = main-session steps only (the denominator for per-step views like contextGrowth and the timeline). Each main call carries turnIndex (which turn it served). ' +
       'NOTE: a turn\'s tokens.cacheRead is a SUM across its steps, NOT the context size — use turn.avgContext / turn.peakContext and summary.contextGrowth (per-step cacheRead) for the real growth curve. ' +
       'A cacheWrite spike usually means the parent re-cached its whole context (e.g. on a subagent return). ' +
       'Use summary.byTurnKind for cost per kind of work, summary.toolTally for the canonical tool counts (do NOT re-aggregate calls[].tools — that over-counts), ' +
-      'summary.highContextCost for the spend above 200k context (what a /compact would have cut), and summary.contextResets for how many times context was cleared. ' +
+      'summary.highContextCost for the FULL spend on calls above 200k context (an UPPER BOUND on what earlier compaction could have saved — a /compact shrinks context to a summary, not zero), and summary.contextResets for how many times context was cleared. ' +
       'summary.contextConsumers names WHAT filled the context — each tool result (which file was read, which command ran) and user prompt, with estimated tokens (~chars/4) and carriedCost (the re-read tax it incurred on every later step) — use it to say which exact file/command consumed the context; its assistant-text / assistant-thinking / assistant-tool-calls rows split the model\'s ' +
       'own output by kind (apportioned from exact output_tokens), so a fat assistant share means verbosity, not reads. ' +
-      'summary.assistantOutput drills into that output: byKind token/cost split and a thinking breakdown — storedTokens vs unstoredTokens (interleaved thinking billed in output_tokens but never saved to the transcript), ' +
+      'summary.assistantOutput drills into that output: byKind token/cost split and a thinking breakdown — storedTokens vs unstoredTokens (interleaved thinking billed in output_tokens but never saved to the transcript; an UPPER estimate — visible content is sized at chars/4 and dense code/tool args tokenize denser, so some of it is really tool-call payload), ' +
       'thinking.byTurn (which prompts drove the reasoning) and thinking.topSteps (the heaviest single bursts, each with its trigger — what landed in context right before — and the action it took next; ' +
       'the thinking text itself is never persisted, so trigger → next-action is the maximum attribution) — use it to explain WHY assistant-thinking is large. ' +
       'summary.bySkill attributes cost to skill dispatches (turns whose prompt is a skill expansion or /slash command) — only the turns the skill itself drove, not later work it influenced. ' +

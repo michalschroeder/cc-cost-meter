@@ -166,4 +166,5 @@ Unknown flags: ignore.
 ## Notes
 
 - Costs are recomputed from raw tokens × LiteLLM prices — never Claude's reported cost.
+  Dollars are API-equivalent value; a subscription (Pro/Max) user didn't marginally pay them.
 - The analyzer is offline; it uses the bundled `data/model_prices.json` snapshot.
