@@ -27,12 +27,14 @@
     {
       "name": "agent-1",
       "label": "Explore the auth module and map every caller of the old token helper",
-      "cost": 0.22
+      "cost": 0.22,
+      "steps": 7
     },
     {
       "name": "agent-2",
       "label": "Draft the migration to the new token service in an isolated worktree",
-      "cost": 0.19
+      "cost": 0.19,
+      "steps": 5
     }
   ],
   "turns": [

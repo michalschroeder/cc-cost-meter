@@ -568,7 +568,19 @@ test('render: payload without calls → timeline placeholder, no crash', () => {
 test('render: empty subagents → placeholder, not a blank table', () => {
   const noSubs = { ...detail, byAgent: [{ name: 'main', label: 'main session', cost: 1 }] };
   const html = render(noSubs, TEMPLATE);
-  assert.match(html, /no subagents/);
+  assert.match(html, /colspan="3"[^>]*>no subagents/);
+});
+
+test('render: subagent row shows steps and keeps the full task one hover away', () => {
+  const longTask = 'Trace every caller of the deprecated token helper and record ' + 'the exact call site '.repeat(8);
+  const withSubs = { ...detail, byAgent: [
+    { name: 'main', label: 'main session', cost: 4.5 },
+    { name: 'agent-9', label: longTask, cost: 0.31, steps: 12 },
+  ] };
+  const html = render(withSubs, TEMPLATE);
+  assert.match(html, /class="prompt has-tip"[^>]*data-full="Trace every caller/); // full task on hover
+  assert.ok(!html.includes(longTask + '</td>'), 'visible task is truncated, not the full text');
+  assert.match(html, /<td class="num">12<\/td>/);                                 // steps rendered
 });
 
 test('mock fixture renders a complete report (no unfilled slots, grade + summaries present)', () => {

@@ -94,6 +94,32 @@ test('smoke: subagent label comes from meta.json description', async () => {
   assert.strictEqual(agent.label, 'Validate DD error tracking');
 });
 
+// With no meta.json, the label falls back to the first prompt — but a skill-dispatch
+// preamble ("Base directory for this skill: …/skills/<name> …") is long boilerplate
+// identical across sibling subagents, so it collapses to `skill: <name>`. Also asserts
+// byAgent carries a `steps` (billed-call) count.
+test('smoke: subagent skill-dispatch label collapses to the skill name + carries steps', async () => {
+  const cfg = mkProfile();
+  const id = 'smoke00b';
+  writeTranscript(cfg, id, fixture(), 1717200000);
+  const subDir = path.join(cfg, 'projects', '-test-proj', id, 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  const step = (uid) => ({ type: 'assistant', timestamp: '2024-06-01T10:05:00Z',
+    message: { id: 'sm' + uid, role: 'assistant', model: 'claude-sonnet-4-6',
+      usage: { input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 500, cache_creation_input_tokens: 100 },
+      content: [{ type: 'text', text: 'ok' }] }, uuid: 's-a' + uid });
+  const sub = [
+    { type: 'user', message: { role: 'user', content: 'Base directory for this skill: /home/u/.claude/skills/deep-research\n\n<long preamble>' }, uuid: 's-u1' },
+    step(1), step(2),
+  ];
+  fs.writeFileSync(path.join(subDir, 'agent-def456.jsonl'), sub.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const out = await runJson([id], cfg);
+  const agent = out.byAgent.find((a) => a.name === 'agent-def456');
+  assert.ok(agent, 'subagent present in byAgent');
+  assert.strictEqual(agent.label, 'skill: deep-research');
+  assert.strictEqual(agent.steps, 2, 'steps counts billed subagent calls');
+});
+
 test('smoke: empty store still emits valid list JSON', async () => {
   const cfg = mkProfile();
   const out = await runJson(['list'], cfg);
