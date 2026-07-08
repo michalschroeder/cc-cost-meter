@@ -56,6 +56,12 @@ Use these both to grade and to write the HOW on cards. Magnitudes are the report
 hedge them in cards ("~30–40%", "community-reported") rather than stating as gospel.
 
 **Context discipline**
+- **Manual vs auto /compact — get it right.** `summary.compactions[].trigger` is ground truth:
+  `"manual"` = the user typed `/compact` (good discipline — credit it), `"auto"` = the session hit
+  the limit and compacted itself (reactive — the context was already too big). `summary.contextResets`
+  is just a count; **never** state or imply "the system auto-compacted" unless a compaction actually
+  has `trigger:"auto"`. If `summary.compactions` is empty, the trigger is unknown — say nothing about
+  manual-vs-auto rather than guessing.
 - **`/compact [focus]`** summarizes history and continues, reusing the cached prefix (the
   summarization call is cheap). Best run *after* finishing a phase, at a natural boundary — not
   mid-debug (it collapses the stack traces you still need) and not after quality already dropped.

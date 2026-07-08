@@ -33,6 +33,32 @@ function readTitleRecap(filePath) {
   return { title, recap };
 }
 
+// Parse the `compact_boundary` system records a transcript writes on every
+// /compact — the AUTHORITATIVE record of context resets (manual or auto), where
+// the token-drop heuristic in session-detail undercounts small compactions.
+// Returns [{ trigger, preTokens, postTokens, cumulativeDroppedTokens, ts }] in
+// file order; empty for older transcripts that predate the boundary record.
+// trigger is 'manual' (user typed /compact) or 'auto' (auto-compact at the limit).
+function parseCompactions(filePath) {
+  let raw;
+  try { raw = fs.readFileSync(filePath, 'utf8'); } catch { return []; }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line || line.indexOf('compact_boundary') === -1) continue; // cheap prefilter
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (!o || o.type !== 'system' || o.subtype !== 'compact_boundary') continue;
+    const m = o.compactMetadata || {};
+    out.push({
+      trigger: typeof m.trigger === 'string' ? m.trigger : null,
+      preTokens: m.preTokens || 0,
+      postTokens: m.postTokens || 0,
+      cumulativeDroppedTokens: m.cumulativeDroppedTokens || 0,
+      ts: o.timestamp || null,
+    });
+  }
+  return out;
+}
+
 // List the immediate project subdirs under <root>/projects/ (absolute paths).
 // Empty when projects/ is absent. Callers resolving many sessions list once and
 // pass the result into findTranscript, rather than re-reading the dir per lookup.
@@ -109,4 +135,4 @@ function listSubagentTranscripts(sessionFile, sessionId) {
   } catch { return []; }
 }
 
-module.exports = { readTitleRecap, findTranscript, projectDirs, listSessions, listSubagentTranscripts };
+module.exports = { readTitleRecap, parseCompactions, findTranscript, projectDirs, listSessions, listSubagentTranscripts };

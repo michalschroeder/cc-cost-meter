@@ -4,6 +4,7 @@ const path = require('path');
 const { getModelCosts } = require('./pricing');
 const { calculateCostBreakdown, extractCacheCreation } = require('./cost-compute');
 const { dayKey } = require('./cost-aggregate');
+const { parseCompactions } = require('./transcript');
 
 // Every token estimate below sizes text at ~this many characters per token.
 const CHARS_PER_TOKEN = 4;
@@ -256,7 +257,9 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   const subWithCost = new Set();
 
   const mainIdx = []; // per kept main call: its index in the main file's parse order
+  const compactions = []; // authoritative /compact boundary records from the main transcript(s)
   for (const d of descriptors) {
+    if (d.isMain) compactions.push(...parseCompactions(d.file));
     const parsed = parseCalls(d.file, d.isMain, d.isMain ? consumerEvents : null);
     if (d.isMain) mainParsedSteps += parsed.length; // accumulate across multiple main halves (cross-cwd resume)
     for (let fi = 0; fi < parsed.length; fi++) {
@@ -331,7 +334,8 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     };
   });
   const mainCalls = perCall.filter((c) => c.isMain);
-  const summary = buildSummary(mainCalls, turns);
+  compactions.sort((a, b) => Date.parse(a.ts || 0) - Date.parse(b.ts || 0));
+  const summary = buildSummary(mainCalls, turns, compactions);
   // Blended cache-read $/token across the main session, for carried-cost estimates.
   const mainCacheReadTokens = mainCalls.reduce((a, c) => a + c.tokens.cacheRead, 0);
   const rate = mainCacheReadTokens > 0
@@ -588,10 +592,18 @@ const RESET_DROP = 100000;
 //  - toolTally: canonical main-session tool counts (consumers that re-aggregate
 //    calls[].tools tend to inflate this — read it here instead).
 //  - highContextCost: calls + cost spent above HIGH_CONTEXT (the compactable spend).
-//  - contextResets: how many times context was cleared (drop > RESET_DROP);
-//    contextResetDropTokens publishes the drop threshold (as highContextCost
+//  - contextResets: how many times context was cleared. AUTHORITATIVE when the
+//    transcript has `compact_boundary` records (contextResets = their count); falls
+//    back to the token-drop heuristic (drop > RESET_DROP) only for older transcripts
+//    that predate the boundary record. contextResetSource says which was used.
+//    contextResetDropTokens publishes the heuristic drop threshold (as highContextCost
 //    publishes thresholdTokens) so renderers don't hardcode it.
-function buildSummary(main, turns) {
+//  - compactions: the per-/compact boundary records — trigger (manual/auto) and
+//    pre/post token counts — the ground truth for the manual-vs-auto story. Read
+//    trigger here; NEVER infer "auto-compacted" from a reset count.
+//  - manualCompacts / autoCompacts: compaction counts by trigger.
+function buildSummary(main, turns, compactions) {
+  compactions = compactions || [];
   const ms = main.map((c) => c.ts).filter(Boolean).map((t) => Date.parse(t)).filter((n) => !isNaN(n));
   const durationMs = ms.length >= 2 ? Math.max(...ms) - Math.min(...ms) : 0;
   const cr = main.map((c) => c.tokens.cacheRead);
@@ -626,6 +638,11 @@ function buildSummary(main, turns) {
     else if (cacheCollapsed) { rebuildCount++; rebuildExtraCost += main[i].cacheWriteCost || 0; }
   }
   const f = main.length ? main[0].tokens : null;
+  // Prefer the authoritative compact_boundary records; fall back to the drop
+  // heuristic only when the transcript has none (older CC versions).
+  const hasBoundaries = compactions.length > 0;
+  const manualCompacts = compactions.filter((c) => c.trigger === 'manual').length;
+  const autoCompacts = compactions.filter((c) => c.trigger === 'auto').length;
   return {
     durationMs,
     mainSteps: main.length, // main-session billed calls — the denominator the timeline/thinking use (detail.calls also counts subagents)
@@ -637,8 +654,17 @@ function buildSummary(main, turns) {
     byTurnKind: [...byKind.values()].sort((a, b) => b.cost - a.cost),
     toolTally: [...tools.entries()].sort((a, b) => b[1] - a[1]),
     highContextCost: { thresholdTokens: HIGH_CONTEXT, calls: hi.length, cost: hi.reduce((a, c) => a + c.cost, 0) },
-    contextResets: resets,
+    contextResets: hasBoundaries ? compactions.length : resets,
+    contextResetSource: hasBoundaries ? 'compact_boundary' : 'token-drop-heuristic',
     contextResetDropTokens: RESET_DROP,
+    // Ground truth for the manual-vs-auto /compact story — read trigger here, never
+    // infer "auto-compacted" from the reset count. Empty on older transcripts.
+    compactions: compactions.map((c) => ({
+      trigger: c.trigger, preTokens: c.preTokens, postTokens: c.postTokens,
+      cumulativeDroppedTokens: c.cumulativeDroppedTokens, ts: c.ts,
+    })),
+    manualCompacts,
+    autoCompacts,
     // Prompt cache expiring then being re-written (long idle gap > cache TTL: ~1h on a
     // Claude subscription, ~5min on API keys). count = how many steps re-cached the
     // whole window; extraCost = the cacheWrite $ that bought nothing new.

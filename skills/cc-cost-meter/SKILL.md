@@ -74,6 +74,9 @@ Unknown flags: ignore.
 3. **Read the precomputed rollups, do NOT hand-aggregate `calls[]`.**
    Use `summary.contextGrowth`, `summary.byTurnKind`, `summary.toolTally`,
    `summary.highContextCost`, `summary.contextResets`, and `summary.contextConsumers`
+   (for the manual-vs-auto /compact story read `summary.compactions[].trigger` — ground
+   truth; **never** infer "auto-compacted" from the reset count, and if `compactions`
+   is empty the trigger is simply unknown)
    (names the exact files/commands whose results filled the context, with estimated
    tokens and the carried re-read cost — lead with these when the user asks WHAT
    consumed the context). When `assistant-thinking` dominates the consumers, drill into
@@ -152,7 +155,8 @@ Unknown flags: ignore.
      #     1. DRAFT. Hand the subagent the rubric EVALUATION.md
      #        (${CLAUDE_SKILL_DIR}/EVALUATION.md — it defines what a 1-5 grade means and what to
      #        reward/penalize) AND the whole detail JSON — especially `summary` (totalCost,
-     #        byTurnKind, bySkill, highContextCost, contextResets, contextConsumers,
+     #        byTurnKind, bySkill, highContextCost, contextResets, compactions (trigger — for
+     #        the manual-vs-auto story; never infer "auto" from the reset count), contextConsumers,
      #        assistantOutput.thinking) and the costliest `turns`/`topPrompts`. Ask it to GRADE
      #        the session 1-5 per the rubric and return { rating, headline, cards }, 3-6 cards
      #        each { verdict, title, what, why, how }:
