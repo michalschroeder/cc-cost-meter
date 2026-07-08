@@ -26,7 +26,7 @@
     SKILL_ROWS          one <tr> per summary.bySkill entry (skill, turns, steps, cost)
     BY_MODEL_ROWS       one <tr> per byModel entry
     TOP_TURNS_ROWS      one <tr> per top turn (cost, kind, skill, peak ctx, what)
-    SUBAGENT_ROWS       one <tr> per byAgent entry (task, cost) — placeholder row if none
+    SUBAGENT_ROWS       one <tr> per byAgent entry (task, steps, cost) — placeholder row if none
     RATING_BADGE        the 1–5 session grade badge (colored by rating); empty when unrated
     ASSESS_CARDS        one verdict-tinted .acard per finding (WHAT/WHY/HOW blocks) from the
                         model's assessment; empty placeholder when none was merged
@@ -540,8 +540,9 @@
       <p class="explain">Smaller side jobs the session handed off to helpers. Each helper works in
       its own short, separate conversation and sends back only a summary, so they usually cost just a
       few cents. If this list is short but the main session was expensive, the way to save money is to
-      hand off more of the exploring to helpers, not to cut back on the ones you already have.</p>
-      <table><thead><tr><th scope="col" data-sort="text">task</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
+      hand off more of the exploring to helpers, not to cut back on the ones you already have.
+      <em>Steps</em> is how many model turns a helper took — a rough measure of how much work it did.</p>
+      <table><thead><tr><th scope="col" data-sort="text">task</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
       <tbody>{{SUBAGENT_ROWS}}</tbody></table>
     </section>
   </div>

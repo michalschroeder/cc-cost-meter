@@ -208,12 +208,28 @@ function firstPrompt(file) {
   return null;
 }
 
+// A human label for a subagent derived from its first prompt (the meta.json
+// `description` is preferred; this is the fallback for transcripts that lack one).
+// A skill-dispatch first prompt is a long boilerplate preamble ("Base directory for
+// this skill: /abs/path/.claude/skills/<name> …") identical across every subagent
+// that ran the same skill — rendered raw it truncates to indistinguishable rows. So
+// collapse it to `skill: <name>`, which stays short, distinct, and meaningful.
+function firstPromptLabel(file) {
+  const fp = firstPrompt(file);
+  if (!fp) return null;
+  if (fp.startsWith('Base directory for this skill:')) {
+    const s = skillName(fp);
+    if (s) return `skill: ${s}`;
+  }
+  return fp;
+}
+
 // Build a per-session cost breakdown from its main transcript + subagent files.
 // Global dedup: first occurrence wins, files processed oldest mtime first (so the
 // total equals lib/cost-aggregate.js's per-session total). Returns:
 // { total, calls, components:{input,output,cacheWrite,cacheRead,web},
 //   unpriced, unpricedModels:[...], byModel:[{model,cost,calls}],
-//   byAgent:[{name,label,cost}], turns:[...], perCall:[...],
+//   byAgent:[{name,label,cost,steps}], turns:[...], perCall:[...],
 //   subagentTotal, subagentCount }.
 // `unpriced` counts billed calls excluded from cost rollups because their model
 // isn't in the price table (the #25 stale-snapshot failure); `unpricedModels`
@@ -239,7 +255,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   for (const f of mains) add(f, 'main', true, 'main session');
   for (const f of subagentFiles || []) {
     const name = path.basename(f).replace(/\.jsonl$/, '');
-    add(f, name, false, agentDescription(f) || firstPrompt(f) || name);
+    add(f, name, false, agentDescription(f) || firstPromptLabel(f) || name);
   }
   descriptors.sort((a, b) => a.mtime - b.mtime); // oldest first → first occurrence wins
 
@@ -288,8 +304,8 @@ function buildDetail(mainFile, subagentFiles, pricing) {
       components.web += b.web;
       const mm = byModel.get(call.model) || { model: call.model, cost: 0, calls: 0 };
       mm.cost += b.total; mm.calls += 1; byModel.set(call.model, mm);
-      const ag = byAgent.get(d.name) || { name: d.name, label: d.label, cost: 0 };
-      ag.cost += b.total; byAgent.set(d.name, ag);
+      const ag = byAgent.get(d.name) || { name: d.name, label: d.label, cost: 0, steps: 0 };
+      ag.cost += b.total; ag.steps += 1; byAgent.set(d.name, ag);
       perCall.push({
         seq: calls, agent: d.name, agentLabel: d.label, isMain: d.isMain,
         model: call.model, ts: call.ts || null,

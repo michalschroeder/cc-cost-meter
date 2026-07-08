@@ -512,9 +512,10 @@ function contextGrowthBar(calls, turns, resetDrop = RESET_DROP, baselineTokens =
 // fan-out only, so drop that row. Empty → an explicit placeholder, not a blank table.
 function subagentRows(byAgent) {
   const subs = (byAgent || []).filter((a) => a.name !== 'main');
-  if (!subs.length) return '<tr><td colspan="2" class="prompt">no subagents</td></tr>';
+  if (!subs.length) return '<tr><td colspan="3" class="prompt">no subagents</td></tr>';
   return subs.map((a) =>
-    `<tr><td class="prompt">${esc(truncate(a.label, 100))}</td>` +
+    `<tr>${tipCell(truncate(a.label, 140), a.label, 'subagent task')}` +
+    `<td class="num">${Number.isFinite(a.steps) ? a.steps : ''}</td>` +
     `<td class="num">${money(a.cost)}</td></tr>`).join('\n');
 }
 
