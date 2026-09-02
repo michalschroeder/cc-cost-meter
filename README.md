@@ -24,6 +24,7 @@ interactive HTML for a mock session (context timeline, per-turn spend, thinking 
 - How much did reasoning (thinking tokens) cost, and which prompts drove it?
 - How much did each skill dispatch / subagent / model cost?
 - How much would a `/compact` have saved (spend above 200k context)?
+- What's the overall grade for spending efficiency? The grade is anchored to a computed avoidable-share band shown under the badge.
 
 ## Usage
 

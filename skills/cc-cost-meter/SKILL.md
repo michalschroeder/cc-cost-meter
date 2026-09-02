@@ -45,18 +45,19 @@ these tokens **before** running the workflow; they map deterministically to the 
 | `--config-dir <path>` | Non-default transcript root (e.g. `~/.claude-lendable`). Passed straight to `analyze.js`. |
 | `--out <path>` | Report output path. Default: `./session-cost-<shortid>.html` in the current working directory. |
 | `--last N` / `--since YYYY-MM-DD` | `list`-mode filters. |
+| `--no-assess` | Skip the four grading subagents (turn/consumer labels and the "Spending less next time" grade). The report renders with "Assessment skipped". Also applied automatically when `totalCost < 0.50`. |
 
-A **detail report always** includes the model-written copy (step 5): the top-turns and
-context-consumer cells, and the "Spending less next time" assessment — no opt-in flag, the
-subagent flow runs every time. (`list` mode produces no detail, so step 5 doesn't apply there.)
-Unknown flags: ignore.
+A **detail report** includes the model-written copy (step 5) unless `--no-assess` is given or the
+session cost under $0.50 — grading a 40-cent session with four subagents costs more than the
+session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknown flags: ignore.
 
 ### Examples
 
 ```bash
-/cc-cost-meter 848c5b25                # detail report (always model-written)
+/cc-cost-meter 848c5b25                # detail report (model-written copy incl.)
 /cc-cost-meter list --last 20          # rank recent sessions by cost
 /cc-cost-meter 848c5b25 --config-dir ~/.claude-lendable
+/cc-cost-meter 848c5b25 --no-assess    # skip the four grading subagents
 ```
 
 ## Workflow
@@ -83,17 +84,18 @@ Unknown flags: ignore.
    `summary.assistantOutput.thinking` — stored vs unstored (interleaved) thinking, the
    per-turn attribution in `thinking.byTurn`, and `thinking.peakStep` — to say WHICH
    prompts drove the reasoning. `summary.bySkill` links cost to skill usage — the turns
-   each skill dispatch drove. Re-aggregating `calls[]` is a known trap: it over-counts
+   each skill dispatch drove. `summary.avoidable` (the computed grade anchor — `band` and
+   `share`), `summary.compactionWhatIf` (`best` = the turn after which one `/compact` would
+   have saved the most, with the estimate), `summary.stepShape` (batching), `summary.modelSwitches`,
+   `summary.idleGaps`. Re-aggregating `calls[]` is a known trap: it over-counts
    tools ~3× and invents false "10× growth" from one early call. The script already
    computed the honest numbers — use them.
 
 4. **Interpret** with the cost model in [REFERENCE.md](REFERENCE.md).
 
-5. **Report (always model-written copy).**
-   - **Narrate the cost story inline using the fixed skeleton below — emit these exact
-     headings, in this order, on every detail run.** No extra sections, no reordering. This
-     is what makes each run surface the same report format; only the two `<one sentence>` /
-     `<biggest lever>` prose lines are free text, everything else is mechanical.
+5. **Report.**
+   - **Narrate the cost story inline using this fixed skeleton — exact headings, this order,
+     every detail run.** Only the `<one sentence>` and the two lever lines are free text.
 
      ```markdown
      ## <session title> — $<total> total
@@ -104,103 +106,65 @@ Unknown flags: ignore.
      - Token type: cache-read $X (Y%) · cache-write $X (Y%) · output $X (Y%) · input $X (Y%)
      - Main vs subagents: main $X (Y%) · subagents $X (Y%)
 
-     **What filled the context**
-     1. <target> — ~<estTokens> tok, carried $<carriedCost>
-     2. <target> — ~<estTokens> tok, carried $<carriedCost>
-     3. <target> — ~<estTokens> tok, carried $<carriedCost>
+     **What filled the context** (of ~<peakContext> peak)
+     1. <row.tool> — <target or summary> — ~<estTokens> tok, carried $<carriedCost>
+     2. …
+     3. …
 
-     **Biggest lever:** <the single highest-impact fix> — up to ~$<highContextCost> saved (upper bound).
+     **Best compact point:** after turn <best.afterTurn> ("<that turn's summary>") at ~<best.contextThen> context — est. ~$<best.estSaving> saved. (Or: "none found — no boundary would have paid for itself.")
 
-     **Grade:** <N>/5 — <assessment headline>
+     **Grade:** <N>/5 (computed anchor <band>/5, ~<share>% avoidable) — <assessment headline>
 
      **Report:** <absolute path>
      ```
 
-     Fill from fixed fields — do NOT improvise the numbers: token-type + main/subagent split
-     from `components` / `byModel` / `byAgent`; the three rows from the top NON-synthetic
-     `summary.contextConsumers.top` entries (`target`, `estTokens`, `carriedCost`); the lever
-     bound from `summary.highContextCost`; the grade from `summary.aiAssessment.rating` /
-     `.headline`; the path is what the renderer prints. Percentages are whole numbers; money
-     uses the report's usual precision. (`list` mode produces no detail — this skeleton is
-     detail-report only.)
-   - Three things come from the model: the TOP TURNS prompt cell ("what this turn
-     accomplished"), the TOP CONTEXT CONSUMERS target cell ("what this file/command/prompt was"),
-     and the **"Spending less next time" assessment** (a 1–5 grade plus verdict-tagged
-     WHAT/WHY/HOW cards). The THINKING "prompt that drove the reasoning" cell reuses the same turn
-     summary by turnIndex, so terse prompts like "do it" become descriptive there too — no extra
-     batch. Don't shell out to a model — dispatch **subagents** (the Agent tool) and merge their
-     output through the helpers into the renderer. Dispatch **four**: one each for the turns and
-     consumer batches (`model: haiku` — mechanical labelling), and **two for the assessment**, a
-     draft pass then an adversarial critic pass, both on a **strong model** (Opus). Each subagent
-     handles its whole batch in a single call (never one per row). The renderer formats
-     money/duration/tokens, draws the proportion bars, ranks the top turns, HTML-escapes every
-     prompt/title/label, prints the absolute path it wrote (`./session-cost-<shortid>.html` in the
-     current working directory — pass `--out <path>` if the user names one; tell the user the
-     path), and opens with an interactive context-window timeline (one SVG bar per step, colored by
-     the 200k threshold, hover for per-step size/cost/prompt). (`assets/report-template.html` holds
-     the styling if you need to tweak it.)
+     Fill from fixed fields — do NOT improvise the numbers: token-type + main/subagent split from
+     `components` / `byAgent`; the three rows are the top 3 of `summary.contextConsumers.top`
+     **whatever their `tool`** (synthetic rows like `session-overhead` or `assistant-thinking` are
+     real answers to "what filled it"; for an `unexplained` row say so); the compact line from
+     `summary.compactionWhatIf.best`; the grade from `summary.aiAssessment.rating` /
+     `.headline` and the anchor from `summary.avoidable`. When the assessment was skipped, the
+     Grade line reads `**Grade:** skipped (<reason>) — computed anchor <band>/5`.
+
+   - **Model-written copy** — four subagents (the Agent tool), each handling its whole batch in one
+     call. The prompts are bundled files; read each, substitute the `{{…}}` slots, dispatch verbatim.
 
      ```bash
-     # From /tmp/detail.json (written in step 2) gather the batches:
-     #   • turns: sort `turns` by cost, take ~10 — hand ONE subagent ALL of them (each row's
-     #     turnIndex + kind + tool tally + prompt); it returns the whole
-     #     { "<turnIndex>": "<summary>", ... } map.
-     #   • consumers: from `summary.contextConsumers.top` take the top ~10 NON-synthetic
-     #     rows (skip rows with `synthetic: true` — those are already-labelled rollups)
-     #     — hand ONE subagent ALL of them (each row's index in `top` + tool + target); it
-     #     returns the whole { "<index>": "<summary>", ... } map.
-     #     Ask for a descriptive 1-2 sentence phrase (~30-45 words) per row saying concretely
-     #     WHAT the item is/did — not a terse label.
-     #   • tips (the assessment) — TWO strong-model passes:
-     #     1. DRAFT. Hand the subagent the rubric EVALUATION.md
-     #        (${CLAUDE_SKILL_DIR}/EVALUATION.md — it defines what a 1-5 grade means and what to
-     #        reward/penalize) AND the whole detail JSON — especially `summary` (totalCost,
-     #        byTurnKind, bySkill, highContextCost, contextResets, compactions (trigger — for
-     #        the manual-vs-auto story; never infer "auto" from the reset count), contextConsumers,
-     #        assistantOutput.thinking) and the costliest `turns`/`topPrompts`. Ask it to GRADE
-     #        the session 1-5 per the rubric and return { rating, headline, cards }, 3-6 cards
-     #        each { verdict, title, what, why, how }:
-     #          - verdict: "good" (done well), "bad" (a real cost problem), or "warn" (watch it).
-     #            Include ≥1 "good" card when earned — it's a review, not just a scolding.
-     #          - what: what happened, quantified from the session's numbers.
-     #          - why:  why it cost (or saved) — tie to a rubric §1 mechanism (cache re-read,
-     #            step multiplication, thinking-as-output, context rot).
-     #          - how:  the fix (name the rubric §2 lever) on bad/warn cards; on a "good" card,
-     #            what to KEEP doing. Write it as a concrete recipe (the command to type, the habit
-     #            to change, and when) — NOT a jargon label. See EVALUATION.md §7 "Voice".
-     #        Name the costly skill + its $, the file/command that dominated context, the prompt
-     #        that drove the reasoning. Be specific and quantified, not generic advice. PLAIN
-     #        LANGUAGE: the reader may not know Claude Code internals — no bare jargon ("batch",
-     #        "gate thinking", "cache_read"); explain any term the first time, prefer plain words
-     #        ("re-reading the whole conversation each step" over "cache_read dominance").
-     #     2. CRITIC (adversarial). Hand a SECOND strong-model subagent the rubric, the detail
-     #        JSON, AND the draft. Tell it to REFUTE the draft: is the 1-5 grade defensible
-     #        against the avoidable-share anchor (don't drift to a soft "3")? What real lever did
-     #        the draft miss, overstate, or misattribute (e.g. blaming a terse prompt for what
-     #        was really context size)? Are the numbers right? ALSO rewrite any card a non-expert
-     #        couldn't act on: strip jargon, and make each `how` a concrete recipe (command to type
-     #        + when), per EVALUATION.md §7 "Voice". It returns the FINAL corrected
-     #        { rating, headline, cards } in the same shape — this is what gets merged.
-     # Merge into ONE /tmp/summaries.json, namespaced by section (tips = the critic's final):
-     #   { "turns":     { "<turnIndex>": "<summary>", ... },
-     #     "consumers": { "<index>":     "<summary>", ... },
-     #     "tips":      { "rating": 2, "headline": "Context ran hot for most of it.",
-     #                    "cards": [ { "verdict": "bad", "title": "Kept context huge",
-     #                                 "what": "…", "why": "…", "how": "…" }, ... ] } }
-     # (A flat { "<turnIndex>": ... } map is still accepted but applies to turns only; a legacy
-     #  `tips` LIST of { head, body } cards is also accepted → what-only warn cards, no grade.)
+     # 1. Trim the payload for the subagents (never hand them detail.json — calls[] alone is ~400 KB):
+     node ${CLAUDE_SKILL_DIR}/scripts/grader-view.js < /tmp/detail.json > /tmp/grader.json
+     ```
+
+     | # | Subagent | Model | Prompt file | Slots | Returns |
+     |---|---|---|---|---|---|
+     | 1 | turns | `haiku` | `${CLAUDE_SKILL_DIR}/references/turns-prompt.md` | `{{TURNS_JSON}}` = ALL `turns` from `/tmp/grader.json` as `[{turnIndex, kind, tools, prompt}]` | `{ "<turnIndex>": { summary, kind } }` |
+     | 2 | consumers | `haiku` | `${CLAUDE_SKILL_DIR}/references/consumers-prompt.md` | `{{CONSUMERS_JSON}}` = `summary.contextConsumers.top` rows with `synthetic` **not** true, as `[{index, tool, target}]` (index = position in `top`) | `{ "<index>": "<phrase>" }` |
+     | 3 | grader | `opus` | `${CLAUDE_SKILL_DIR}/references/grader-prompt.md` | `{{EVALUATION_MD_PATH}}`, `{{GRADER_JSON_PATH}}` (= `/tmp/grader.json`), `{{SUMMARIES_JSON_PATH}}` | `{ rating, anchorNote, headline, cards }` |
+     | 4 | critic | `opus` | `${CLAUDE_SKILL_DIR}/references/critic-prompt.md` | same three paths + `{{DRAFT_JSON}}` = subagent 3's output | final `{ rating, anchorNote, headline, cards }` |
+
+     Order: 1 and 2 in parallel → write `/tmp/summaries.json` with `turns` + `consumers` → 3 (it reads
+     the turn kinds from that file) → 4 → add the critic's output as `tips` to `/tmp/summaries.json`.
+     With `--no-assess` (or cost < $0.50) skip all four and write
+     `{ "tips": { "skipped": "--no-assess" } }` or `{ "tips": { "skipped": "session under $0.50" } }`.
+
+     ```bash
+     # 2. Merge + render (the renderer needs the FULL detail, not grader.json):
      node ${CLAUDE_SKILL_DIR}/scripts/apply-summaries.js --summaries /tmp/summaries.json < /tmp/detail.json \
        | node ${CLAUDE_SKILL_DIR}/scripts/render-report.js
      ```
 
-     `apply-summaries.js` merges the JSON in (turns by `turnIndex`, consumers by their index in
-     `summary.contextConsumers.top`, tips → `summary.aiAssessment`) and the renderer fills the
-     cells from it, keeping the raw prompt/target one hover away. The assessment is AI-only:
-     **always run the four subagents above** — if `aiAssessment` is missing, the grade section
-     renders empty.
+     `/tmp/summaries.json` final shape:
+     `{ "turns": { "<turnIndex>": { "summary": "…", "kind": "…" } }, "consumers": { "<index>": "…" },
+        "tips": { "rating": 2, "anchorNote": "…", "headline": "…", "cards": [ … ] } }`.
+     `apply-summaries.js` merges it (turns by `turnIndex` → `summary` + `userKind`; consumers by
+     index; tips → `summary.aiAssessment`; `anchorNote` is for the critic, not rendered). The renderer
+     prints the absolute path it wrote — relay it. It draws the grade badge with the computed anchor
+     beneath it, so a reader sees both the model's grade and the number it was anchored to.
 
 ## Notes
 
 - Costs are recomputed from raw tokens × LiteLLM prices — never Claude's reported cost.
   Dollars are API-equivalent value; a subscription (Pro/Max) user didn't marginally pay them.
 - The analyzer is offline; it uses the bundled `data/model_prices.json` snapshot.
+- The grade is anchored: `summary.avoidable.band` is computed from the compaction counterfactual,
+  reducible thinking and cache rebuilds; the grader may move ±1 with a stated reason. Two reports
+  of the same session should agree within one point.

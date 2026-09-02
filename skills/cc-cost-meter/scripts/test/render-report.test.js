@@ -605,6 +605,47 @@ test('render: Top turns (Basic) renders before the advanced Reasoning/trio secti
   assert.ok(!/<h2 id="turns"[^>]*class="[^"]*adv/.test(html), 'Top turns must not be advanced');
 });
 
+test('render: grade badge shows the computed anchor from summary.avoidable', () => {
+  const d = JSON.parse(JSON.stringify(detail));
+  d.summary.avoidable = { excessContext: 0.9, reducibleThinking: 0.4, cacheRebuilds: 0, total: 1.3, share: 0.287, band: 3 };
+  d.summary.aiAssessment = { rating: 2, headline: 'Ran <hot>', cards: [{ verdict: 'bad', title: 't', what: 'w', why: 'y', how: 'h' }] };
+  const html = render(d, TEMPLATE);
+  assert.match(html, /class="grade-anchor"/);
+  assert.match(html, /Computed anchor: 3\/5 — ~29% of the bill looks avoidable \(\$1\.30\)/);
+  assert.match(html, /Ran &lt;hot&gt;/);
+});
+
+test('render: skipped assessment with a deterministic cache-rebuild card still shows the skip headline', () => {
+  const d = JSON.parse(JSON.stringify(detail));
+  d.summary.cacheRebuilds = { count: 2, extraCost: 0.42 };
+  d.summary.aiAssessment = { rating: null, headline: 'Assessment skipped: session under $0.50', cards: [], skipped: true };
+  const html = render(d, TEMPLATE);
+  assert.match(html, /Assessment skipped: session under \$0\.50/);            // skip headline present
+  assert.match(html, /Prompt cache expired mid-session/);                    // deterministic card also present
+  assert.ok(!/No assessment available/.test(html));
+});
+
+test('render: rating null with a computed anchor shows anchor-only badge, no rating pips/number', () => {
+  const d = JSON.parse(JSON.stringify(detail));
+  d.summary.avoidable = { excessContext: 0.9, reducibleThinking: 0.4, cacheRebuilds: 0, total: 1.3, share: 0.287, band: 3 };
+  d.summary.aiAssessment = { rating: null, headline: '', cards: [], skipped: true };
+  const html = render(d, TEMPLATE);
+  assert.ok(!/class="grade grade-\d"/.test(html), 'no rated grade badge');
+  assert.ok(!/class="grade-num"/.test(html), 'no rating number');
+  assert.ok(!/class="grade-pips"/.test(html), 'no pips');
+  assert.match(html, /class="grade-anchor"/);
+  assert.match(html, /Computed anchor: 3\/5 — ~29% of the bill looks avoidable \(\$1\.30\)/);
+});
+
+test('render: skipped assessment shows the reason, no badge', () => {
+  const d = JSON.parse(JSON.stringify(detail));
+  d.summary.aiAssessment = { rating: null, headline: 'Assessment skipped: session under $0.50', cards: [], skipped: true };
+  const html = render(d, TEMPLATE);
+  assert.ok(!/class="grade grade-\d"/.test(html), 'no grade badge');
+  assert.match(html, /Assessment skipped: session under \$0\.50/);
+  assert.ok(!/No assessment available/.test(html));
+});
+
 test('formatting helpers', () => {
   assert.strictEqual(money(4.5287), '$4.53');
   assert.strictEqual(money(0.0021), '$0.0021'); // sub-cent stays informative

@@ -534,8 +534,13 @@ const clampRating = (v) => {
   const n = Math.round(Number(v));
   return Number.isFinite(n) && n >= 1 && n <= 5 ? n : null;
 };
+// Share can exceed 1 (buildAvoidable sums overlapping slices) or be negative/NaN — clamp for display.
+const clampShare = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.min(1, n) : 0;
+};
 
-// → { rating: 1–5|null, headline, cards:[{verdict,title,what,why,how}] }.
+// → { rating: 1–5|null, headline, cards:[{verdict,title,what,why,how}], anchor, skipped }.
 // The assessment is always AI-written (the analyzer workflow grades every session via subagents
 // and merges the result into summary.aiAssessment). When it's absent — only a raw manual
 // `render-report.js < detail.json` with no merge step — the grade section renders empty.
@@ -561,15 +566,25 @@ function buildAssessment(detail) {
       how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
     });
   }
-  const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null);
-  if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards };
-  return { rating: null, headline: '', cards };
+  const av = s.avoidable;
+  const anchor = av && av.band != null && Number.isFinite(Number(av.band))
+    ? { band: clampRating(av.band), share: clampShare(av.share), total: Number(av.total) || 0 } : null;
+  const skipped = !!(ai && ai.skipped);
+  const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null || skipped);
+  if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards, anchor, skipped };
+  return { rating: null, headline: '', cards, anchor, skipped: false };
 }
 
-// The 1–5 grade badge that sits at the very top of the report. Empty when unrated.
+// The 1–5 grade badge that sits at the very top of the report. When there's no rating (skipped
+// assessment) but a computed anchor exists, render the anchor line alone — no fake rating/pips.
+// Empty only when neither a rating nor an anchor is available.
 function ratingBadge(a) {
   const r = clampRating(a.rating);
-  if (r == null) return '';
+  if (r == null) {
+    if (!a.anchor || a.anchor.band == null) return '';
+    return `<div class="grade">
+    <div class="grade-meta"><div class="grade-anchor">Computed anchor: ${a.anchor.band}/5 — ~${Math.round(a.anchor.share * 100)}% of the bill looks avoidable (${money(a.anchor.total)})</div></div></div>`;
+  }
   const word = (GRADE[r] || GRADE[3]).word;
   const pips = Array.from({ length: 5 }, (_, i) =>
     `<span class="pip${i < r ? ' on' : ''}"></span>`).join('');
@@ -578,25 +593,34 @@ function ratingBadge(a) {
     <div class="grade-meta"><div class="grade-word">${esc(word)}</div>
       <div class="grade-pips">${pips}</div>` +
     (a.headline ? `<div class="grade-line">${esc(a.headline)}</div>` : '') +
+    (a.anchor && a.anchor.band != null
+      ? `<div class="grade-anchor">Computed anchor: ${a.anchor.band}/5 — ~${Math.round(a.anchor.share * 100)}% of the bill looks avoidable (${money(a.anchor.total)})</div>`
+      : '') +
     `</div></div>`;
 }
 
 // The assessment cards: each a colored panel with WHAT / WHY / HOW blocks. The HOW block is
 // "Keep it up" on a good card (reinforce) and "How to fix" on a bad/warn card; omitted if empty.
 function assessmentCards(a) {
+  // The skip headline is a separate card, prepended alongside any deterministic cards (e.g. the
+  // cache-rebuild card) — it must not be gated on an empty card list, or a skipped assessment on
+  // a session with deterministic findings would never show why grading was skipped.
+  const skipCard = a.skipped && a.headline
+    ? `<div class="acard acard-good"><div class="ablk"><span class="atext">${esc(a.headline)}</span></div></div>`
+    : '';
   if (!a.cards.length) {
-    return '<div class="acard acard-good"><div class="ablk"><span class="atext">No assessment ' +
-      'available for this session.</span></div></div>';
+    return skipCard || '<div class="acard acard-good"><div class="ablk"><span class="atext">No assessment available for this session.</span></div></div>';
   }
   const blk = (label, text) => text
     ? `<div class="ablk"><span class="alabel">${label}</span><span class="atext">${esc(text)}</span></div>` : '';
-  return a.cards.map((c) => {
+  const cards = a.cards.map((c) => {
     const howLabel = c.verdict === 'good' ? 'Keep it up' : 'How to fix';
     const body = blk('What', c.what) + blk('Why', c.why) + blk(howLabel, c.how);
     return `<div class="acard acard-${normVerdict(c.verdict)}">` +
       (c.title ? `<div class="acard-title">${esc(c.title)}</div>` : '') +
       (body || '<div class="ablk"><span class="atext"></span></div>') + `</div>`;
   }).join('\n');
+  return skipCard ? skipCard + '\n' + cards : cards;
 }
 
 // ---- fill ---------------------------------------------------------------------

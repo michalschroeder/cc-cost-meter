@@ -156,3 +156,28 @@ test('apply-summaries: non-JSON stdin is echoed verbatim', async () => {
   const out = await run('not json', []);
   assert.strictEqual(out, 'not json');
 });
+
+test('apply: object turn values set summary and userKind; bad kinds dropped', async () => {
+  const summaries = { turns: {
+    2: { summary: 'Asked to ship it', kind: 'approval' },
+    3: { summary: 'Pushed back on the branch', kind: 'nonsense' },
+  } };
+  const f = path.join(os.tmpdir(), `sum-${process.pid}-tags.json`);
+  fs.writeFileSync(f, JSON.stringify(summaries));
+  const out = JSON.parse(await run(JSON.stringify(payload()), ['--summaries', f]));
+  const t2 = out.turns.find((t) => t.turnIndex === 2);
+  const t3 = out.turns.find((t) => t.turnIndex === 3);
+  assert.strictEqual(t2.summary, 'Asked to ship it');
+  assert.strictEqual(t2.userKind, 'approval');
+  assert.strictEqual(t3.summary, 'Pushed back on the branch');
+  assert.ok(!('userKind' in t3));
+});
+
+test('apply: tips.skipped → headline-only assessment flagged skipped', async () => {
+  const summaries = { tips: { skipped: 'session under $0.50' } };
+  const f = path.join(os.tmpdir(), `sum-${process.pid}-skip.json`);
+  fs.writeFileSync(f, JSON.stringify(summaries));
+  const out = JSON.parse(await run(JSON.stringify(payload()), ['--summaries', f]));
+  assert.deepStrictEqual(out.summary.aiAssessment,
+    { rating: null, headline: 'Assessment skipped: session under $0.50', cards: [], skipped: true });
+});
