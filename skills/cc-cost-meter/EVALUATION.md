@@ -26,7 +26,7 @@ use the transcript-derived turn labels only to explain them. Field → what it d
 | `thinking.stepsWithThinking / mainSteps` | "reasoning on most steps" | only when > 0.8 AND stepSource = thinking-blocks |
 | `summary.stepShape.parallelSteps`, `.stepsWithTools` | batching | parallelSteps / stepsWithTools < 0.1 on ≥ 20 tool steps = unbatched |
 | `summary.modelSwitches.count` | cache busts | each switch = one full re-write; > 0 is a "warn", ≥ 3 a "bad" |
-| `byModel` | model routing | Opus with `toolTally` dominated by Bash/Read/Edit = mechanical work on the priciest model |
+| `byModel` cost split plus session-wide `summary.toolTally` | model routing | Opus with `toolTally` dominated by Bash/Read/Edit = mechanical work on the priciest model |
 | `summary.idleGaps`, `summary.cacheRebuilds` | idle cost | rebuild `extraCost` > 5% of bill = "bad" |
 | `summary.compactions[].trigger` | manual vs auto | ground truth; empty = unknown, say nothing |
 | `summary.bySkill` | review-on-implementation | `code-review` / `simplify` / `security-review` in a session that also edited files |
