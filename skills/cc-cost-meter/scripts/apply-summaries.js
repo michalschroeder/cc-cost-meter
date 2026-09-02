@@ -37,11 +37,16 @@ const fs = require('fs');
 const clean = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
 
 function parseArgs(argv) {
-  const opts = { summaries: undefined };
+  const opts = { summaries: undefined, recordGrade: false, configDir: undefined };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--summaries') {
       if (i + 1 >= argv.length) { process.stderr.write('apply-summaries.js: --summaries requires a path\n'); process.exit(1); }
       opts.summaries = argv[++i];
+    } else if (argv[i] === '--record-grade') {
+      opts.recordGrade = true;
+    } else if (argv[i] === '--config-dir') {
+      if (i + 1 >= argv.length) { process.stderr.write('apply-summaries.js: --config-dir requires a path\n'); process.exit(1); }
+      opts.configDir = argv[++i];
     }
   }
   return opts;
@@ -179,6 +184,19 @@ async function main() {
   }
   process.stderr.write(`apply-summaries: applied ${applied} turn + ${appliedCc} consumer summaries + ${maps.assessment ? 1 : 0} assessment (${appliedCards} cards)\n`);
   process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+
+  if (opts.recordGrade && payload.summary && payload.summary.aiAssessment && payload.summary.aiAssessment.rating != null) {
+    const { resolveStateDir } = require('./lib/state');
+    const { recordGrade } = require('./lib/grades');
+    const av = payload.summary.avoidable || {};
+    try {
+      recordGrade(resolveStateDir(opts.configDir !== undefined ? opts.configDir : process.env.CLAUDE_CONFIG_DIR), {
+        session: payload.session, rating: payload.summary.aiAssessment.rating,
+        band: av.band != null ? av.band : null, share: av.share != null ? av.share : null,
+        ts: new Date().toISOString(),
+      });
+    } catch (e) { process.stderr.write(`apply-summaries.js: could not record grade (${e.message})\n`); }
+  }
 }
 
 main();
