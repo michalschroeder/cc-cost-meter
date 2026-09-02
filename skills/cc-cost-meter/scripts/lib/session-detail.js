@@ -5,6 +5,7 @@ const { getModelCosts } = require('./pricing');
 const { calculateCostBreakdown, extractCacheCreation } = require('./cost-compute');
 const { dayKey } = require('./cost-aggregate');
 const { parseCompactions } = require('./transcript');
+const { buildCompactionWhatIf } = require('./compaction-whatif');
 
 // Every token estimate below sizes text at ~this many characters per token.
 const CHARS_PER_TOKEN = 4;
@@ -77,15 +78,22 @@ function resultChars(content) {
 // Char sizes of what the model itself emitted in one assistant message, by kind:
 // prose text, extended-thinking blocks, and the tool_use arguments it wrote (Edit
 // payloads, Bash commands, subagent prompts). Used to apportion the call's exact
-// output_tokens across those kinds. Keep LAST per message id, like usage/tools.
+// output_tokens across those kinds. Operates on the MERGED block list for a message
+// id (see parseCalls) — one measurement over all its blocks, not per JSONL line.
 function measureOutput(c) {
-  const p = { text: 0, thinking: 0, toolInput: {} };
+  const p = { text: 0, thinking: 0, toolInput: {}, thinkingBlocks: 0 };
   if (typeof c === 'string') { p.text = c.length; return p; }
   if (!Array.isArray(c)) return p;
   for (const b of c) {
     if (!b) continue;
     if (b.type === 'text' && typeof b.text === 'string') p.text += b.text.length;
-    else if (b.type === 'thinking' && typeof b.thinking === 'string') p.thinking += b.thinking.length;
+    else if (b.type === 'thinking' || b.type === 'redacted_thinking') {
+      // Claude Code stores the block (often with empty text) even when the thinking
+      // text itself is not persisted — the block's presence is the ground truth that
+      // this step reasoned.
+      p.thinkingBlocks += 1;
+      if (typeof b.thinking === 'string') p.thinking += b.thinking.length;
+    }
     else if (b.type === 'tool_use') {
       const n = b.name || '?';
       const t = p.toolInput[n] || { chars: 0, count: 0 };
@@ -96,17 +104,38 @@ function measureOutput(c) {
   return p;
 }
 
+// Identity key for deduping content blocks merged across JSONL lines (see below):
+// type plus whichever of id (tool_use) / signature (thinking) / thinking text (an
+// unsigned thinking block) / text / stringified input distinguishes it. A block with none of those has no dedup key and is always
+// kept (better to over-keep an indistinguishable block than drop a real one).
+function blockKey(b) {
+  const type = b.type || '';
+  if (b.id !== undefined) return `${type}|id:${b.id}`;
+  if (b.signature !== undefined) return `${type}|sig:${b.signature}`;
+  if (typeof b.thinking === 'string') return `${type}|think:${b.thinking}`;
+  if (b.text !== undefined) return `${type}|text:${b.text}`;
+  if (b.input !== undefined) return `${type}|input:${JSON.stringify(b.input)}`;
+  return null;
+}
+
 // Parse a transcript into ordered, within-file-deduped calls:
-// { id, ts, usage, model, prompt, turn, tools }. within-file: keep LAST usage/tools
-// per message.id, carry FIRST timestamp + FIRST active prompt. id-less calls always
-// kept. When `trackPrompts`, each call is tagged with the active user prompt and a
-// monotonic `turn` index that increments on EVERY user submission — so two turns
-// with identical prompt text stay distinct (turn 0 = pre-prompt session start).
-// When `consumers` (array) is given, every tool_result and user prompt is pushed
-// onto it as { tool, target, estTokens, afterStep } — what landed in this
-// transcript's context, attributed to the concrete file/command/pattern it came
-// from, sized at ~4 chars/token, tagged with how many billed calls preceded it.
-function parseCalls(file, trackPrompts, consumers) {
+// { id, ts, usage, model, prompt, turn, tools, outParts }. within-file: keep LAST
+// usage/model per message.id, carry FIRST timestamp + FIRST active prompt. Content
+// blocks (thinking/text/tool_use) are MERGED across every line sharing a message.id
+// (Claude Code writes one content block per JSONL line, not one line per message —
+// see the merge below), then `tools`/`outParts` are derived once from that merged
+// list. id-less calls always kept. When `trackPrompts`, each call is tagged with the
+// active user prompt and a monotonic `turn` index that increments on EVERY user
+// submission — so two turns with identical prompt text stay distinct (turn 0 =
+// pre-prompt session start). `turnOffset` seeds that counter so a resumed session's
+// later transcript half continues the earlier half's numbering instead of colliding
+// with it (see buildDetail); the returned array carries `lastTurn`, the final counter
+// value, as the next half's offset. When `consumers` (array) is given, every tool_result
+// and user prompt is pushed onto it as { tool, target, estTokens, afterStep } — what
+// landed in this transcript's context, attributed to the concrete file/command/
+// pattern it came from, sized at ~4 chars/token, tagged with how many billed calls
+// preceded it.
+function parseCalls(file, trackPrompts, consumers, turnOffset) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
   const byKey = new Map();
@@ -114,7 +143,7 @@ function parseCalls(file, trackPrompts, consumers) {
   const pendingTools = new Map(); // tool_use id → { tool, target }
   let synth = 0;
   let current = '(session start)';
-  let turn = 0;
+  let turn = turnOffset || 0;
   for (const line of raw.split('\n')) {
     if (!line) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
@@ -144,19 +173,44 @@ function parseCalls(file, trackPrompts, consumers) {
     const realId = typeof m.id === 'string' && m.id ? m.id : null;
     const key = realId || `__synth__${synth++}`;
     if (!byKey.has(key)) order.push(key);
-    const prev = byKey.get(key);
-    byKey.set(key, {
-      id: realId,
-      ts: prev ? prev.ts : o.timestamp,
-      usage: m.usage,
-      model: m.model,
-      prompt: prev ? prev.prompt : current,
-      turn: prev ? prev.turn : turn,
-      tools: toolNames(m),
-      outParts: measureOutput(m.content),
-    });
+    let rec = byKey.get(key);
+    if (!rec) {
+      rec = { id: realId, ts: o.timestamp, usage: m.usage, model: m.model,
+        prompt: current, turn, blocks: [], blockKeys: new Set() };
+      byKey.set(key, rec);
+    } else {
+      rec.usage = m.usage; // keep LAST usage/model per message.id
+      rec.model = m.model;
+    }
+    // Claude Code writes one content block per JSONL line, all sharing this
+    // message.id (e.g. a thinking line then a tool_use line) — accumulate the blocks
+    // of every such line here, deduped by identity, in first-seen order. Only lines
+    // that carry usage+model get this far (the guard above), so a hypothetical
+    // content-only continuation line would be skipped and its blocks lost; today's
+    // transcripts repeat the full message envelope on every line.
+    const blocksIn = typeof m.content === 'string' ? [{ type: 'text', text: m.content }]
+      : (Array.isArray(m.content) ? m.content : []);
+    for (const b of blocksIn) {
+      if (!b) continue;
+      const k = blockKey(b);
+      if (k !== null) {
+        if (rec.blockKeys.has(k)) continue;
+        rec.blockKeys.add(k);
+      }
+      rec.blocks.push(b);
+    }
   }
-  return order.map((k) => byKey.get(k));
+  const out = order.map((k) => {
+    const rec = byKey.get(k);
+    return {
+      id: rec.id, ts: rec.ts, usage: rec.usage, model: rec.model,
+      prompt: rec.prompt, turn: rec.turn,
+      tools: toolNames({ content: rec.blocks }),
+      outParts: measureOutput(rec.blocks),
+    };
+  });
+  out.lastTurn = turn; // highest turn index reached in this file (see turnOffset)
+  return out;
 }
 
 // Coarse class of a main-session turn, for attributing cost to *kinds* of work.
@@ -245,6 +299,40 @@ function firstPromptLabel(file) {
 // `mainFile` accepts a single path or an array — a session resumed under a
 // different cwd has a transcript half under each `projects/<enc-cwd>/` dir, and
 // all halves must be folded in to match the list COST (aggregate sums them all).
+// Rubric §2 "Thinking control": /effort low is a ~50–70% reduction, not elimination.
+const THINKING_REDUCIBLE = 0.5;
+// Rubric §6 bands on the avoidable share of the bill: <5% → 5, <15% → 4, <30% → 3, <50% → 2, else 1.
+const BAND_THRESHOLDS = [0.05, 0.15, 0.30, 0.50];
+
+// The computed anchor for the 1–5 grade: how much of THIS bill a disciplined driver
+// would not have paid. Three slices — cache-read spend a compact-when-large habit
+// would have avoided, the reducible half of thinking output, and cache re-writes
+// bought by idling past the TTL. They are NOT fully disjoint: thinking tokens sit in
+// the window, so reducing thinking shrinks the same context compactionWhatIf.policy
+// claims savings on — doing both would save somewhat less than the sum. The sum is
+// the spec's formula and a deliberate upper bound. Graders start from `band` and must
+// justify any deviation.
+function buildAvoidable(summary, total) {
+  const w = summary.compactionWhatIf;
+  const ao = summary.assistantOutput;
+  const excessContext = w && w.policy ? w.policy.estSaving : 0;
+  const thinkingCost = ao && ao.byKind ? ao.byKind.thinking.cost : 0;
+  const reducibleThinking = thinkingCost * THINKING_REDUCIBLE;
+  const cacheRebuilds = (summary.cacheRebuilds && summary.cacheRebuilds.extraCost) || 0;
+  const sum = excessContext + reducibleThinking + cacheRebuilds;
+  const share = total > 0 ? sum / total : 0;
+  let band = 1;
+  for (let i = 0; i < BAND_THRESHOLDS.length; i++) if (share < BAND_THRESHOLDS[i]) { band = 5 - i; break; }
+  return {
+    note: 'Computed anchor for the grade. excessContext = cache-read spend a compact-when-over-120k habit would have avoided (compactionWhatIf.policy); ' +
+      'reducibleThinking = thinkingReducibleFraction of thinking output cost (/effort low); cacheRebuilds = cache re-writes after idle gaps. ' +
+      'share = total / session cost; band = rubric §6 bracket (bandThresholds are the upper bounds for 5,4,3,2). Estimates. ' +
+      'The slices overlap slightly: thinking tokens are part of the context excessContext would have compacted away, so total is an upper bound, not a sum of independent savings.',
+    excessContext, reducibleThinking, thinkingReducibleFraction: THINKING_REDUCIBLE, cacheRebuilds,
+    total: sum, share, band, bandThresholds: BAND_THRESHOLDS.slice(),
+  };
+}
+
 function buildDetail(mainFile, subagentFiles, pricing) {
   const descriptors = [];
   const add = (file, name, isMain, label) => {
@@ -274,10 +362,22 @@ function buildDetail(mainFile, subagentFiles, pricing) {
 
   const mainIdx = []; // per kept main call: its index in the main file's parse order
   const compactions = []; // authoritative /compact boundary records from the main transcript(s)
+  // Turn indices must be monotonic across the main halves of a resumed (cross-cwd)
+  // session, or two unrelated turns from different halves collide on one index (they
+  // merge into one `turns` row, and the turn-bounded thinking carry reaches across
+  // halves). Each half continues the previous one's numbering: its turn 0 — "before
+  // any user prompt in THIS file" — is the continuation of the previous half's last
+  // turn, so it maps onto that turn's index. A single-file session offsets by 0 and
+  // numbers exactly as before.
+  let mainTurnOffset = 0;
   for (const d of descriptors) {
     if (d.isMain) compactions.push(...parseCompactions(d.file));
-    const parsed = parseCalls(d.file, d.isMain, d.isMain ? consumerEvents : null);
-    if (d.isMain) mainParsedSteps += parsed.length; // accumulate across multiple main halves (cross-cwd resume)
+    const parsed = parseCalls(d.file, d.isMain, d.isMain ? consumerEvents : null,
+      d.isMain ? mainTurnOffset : 0);
+    if (d.isMain) {
+      mainParsedSteps += parsed.length; // accumulate across multiple main halves (cross-cwd resume)
+      mainTurnOffset = parsed.lastTurn;
+    }
     for (let fi = 0; fi < parsed.length; fi++) {
       const call = parsed[fi];
       if (!dayKey(call.ts)) continue; // parity: cost-aggregate drops undated calls, so the detail total matches list COST
@@ -359,8 +459,12 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   // totalSteps is the main file's PARSE-ORDER call count — the same index space as
   // each event's afterStep (which counts every parsed main call, incl. ones later
   // dropped by dedup/zero-cost), so steps-remaining doesn't clamp to 0.
+  // Does this transcript record thinking blocks at all? Decides whether the output
+  // residual is attributed per-step (exact) or everywhere (legacy upper bound).
+  const thinkingTracked = mainCalls.some((c) => c.outParts && c.outParts.thinkingBlocks > 0);
   summary.contextConsumers = buildConsumers(
-    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate));
+    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate, thinkingTracked),
+    summary.contextGrowth.peakContext);
   // What landed in context right before each main call — the likely trigger of
   // that call's reasoning. Keyed by parse-order index; biggest event wins when a
   // batch of tool_results returns at once.
@@ -369,7 +473,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     const cur = triggerByIdx.get(e.afterStep);
     if (!cur || e.estTokens > cur.estTokens) triggerByIdx.set(e.afterStep, e);
   }
-  summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx);
+  summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx, thinkingTracked);
   // Top-3 things that landed in context right before each main call — what got
   // newly written into that step — attached per call for the chart tooltip. Same
   // afterStep→call mapping triggerByIdx/mainIdx already use; estTokens only ranks
@@ -403,6 +507,8 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     bySkill.set(name, e);
   }
   summary.bySkill = [...bySkill.values()].sort((a, b) => b.cost - a.cost);
+  summary.compactionWhatIf = buildCompactionWhatIf(mainCalls, compactions);
+  summary.avoidable = buildAvoidable(summary, total);
   return {
     total, calls, components,
     unpriced, unpricedModels: [...unpricedModels],
@@ -414,26 +520,29 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   };
 }
 
-// Apportion one call's exact output_tokens across what the model emitted: prose
-// text, thinking, and the tool_use arguments it wrote. Visible content blocks are
-// sized at ~chars/4; when output_tokens exceed that, the excess is interleaved
-// thinking the transcript didn't store (returned as unstoredThinking) — attributed
-// to the thinking bucket instead of being smeared over tiny tool args. When
-// output_tokens are below the chars/4 estimate, the visible parts scale down
-// proportionally. Blockless content counts as prose.
-function apportionOutput(c) {
+// Apportion one call's exact output_tokens across what the model emitted. Visible
+// blocks are sized at ~chars/4. The residual (output_tokens beyond that estimate) is
+// interleaved thinking ONLY on a step that carries a thinking block; on a step with
+// none it is tokenizer density (dense code/tool args run ~3 chars/token) and is
+// folded back into the visible parts. `tracked` = this session's transcript records
+// thinking blocks at all; when it doesn't (older CC versions), every residual is
+// treated as thinking — the legacy heuristic.
+function apportionOutput(c, tracked) {
   const o = c.tokens.output;
-  const p = c.outParts || { text: 0, thinking: 0, toolInput: {} };
+  const p = c.outParts || { text: 0, thinking: 0, toolInput: {}, thinkingBlocks: 0 };
   const toolChars = Object.values(p.toolInput).reduce((a, t) => a + t.chars, 0);
   const total = p.text + p.thinking + toolChars;
   const visTok = total / CHARS_PER_TOKEN;
-  const scale = o > visTok ? 1 / CHARS_PER_TOKEN : (total > 0 ? o / total : 0);
+  const thought = tracked ? (p.thinkingBlocks || 0) > 0 : true;
+  const residual = total > 0 ? Math.max(0, o - visTok) : 0;
+  const scale = total > 0 ? ((o > visTok && thought) ? 1 / CHARS_PER_TOKEN : o / total) : 0;
   const perTool = {};
   for (const [name, t] of Object.entries(p.toolInput)) perTool[name] = { tok: t.chars * scale, count: t.count };
   return {
-    text: total > 0 ? p.text * scale : o, // blockless content → all prose
+    text: total > 0 ? p.text * scale : o,
     storedThinking: p.thinking * scale,
-    unstoredThinking: total > 0 ? Math.max(0, o - visTok) : 0,
+    unstoredThinking: thought ? residual : 0,
+    thought,
     perTool,
   };
 }
@@ -447,7 +556,7 @@ function apportionOutput(c) {
 // The thinking TEXT itself is unrecoverable (never persisted anywhere); trigger →
 // next-action is the maximum attribution the transcript supports. Null when the
 // session has no billed output.
-function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
+function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx, tracked) {
   const kinds = { text: { tokens: 0, cost: 0 }, thinking: { tokens: 0, cost: 0 }, toolCalls: { tokens: 0, cost: 0 } };
   let stored = 0, unstored = 0, withThinking = 0;
   const steps = [];
@@ -456,7 +565,7 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
     const c = mainCalls[j];
     const o = c.tokens.output;
     if (!o) continue;
-    const a = apportionOutput(c);
+    const a = apportionOutput(c, tracked);
     const think = a.storedThinking + a.unstoredThinking;
     const toolTok = Object.values(a.perTool).reduce((s, t) => s + t.tok, 0);
     const costOf = (tok) => (c.outCost || 0) * (tok / o);
@@ -464,8 +573,8 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
     kinds.thinking.tokens += think; kinds.thinking.cost += costOf(think);
     kinds.toolCalls.tokens += toolTok; kinds.toolCalls.cost += costOf(toolTok);
     stored += a.storedThinking; unstored += a.unstoredThinking;
+    if (a.thought && (think > 0 || tracked)) withThinking += 1;
     if (think > 0) {
-      withThinking += 1;
       const trg = triggerByIdx.get(mainIdx[j]);
       steps.push({
         seq: j + 1, tokens: Math.round(think), // main-session step ordinal (1..mainSteps), not the global billed seq
@@ -487,9 +596,11 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
       'thinking.unstoredTokens = output_tokens beyond the visible content — interleaved thinking the transcript does not store (its text is unrecoverable). ' +
       'It is an UPPER estimate: visible content is sized at ~4 chars/token, and dense code/tool args tokenize denser, so some of the excess is really tool-call payload. ' +
       'thinking.byTurn names which prompts drove the reasoning; thinking.topSteps are the heaviest single bursts, each with its trigger (what landed in context right before) and the action it took next. ' +
-      'Estimates apportioned per call from exact output_tokens.',
+      'Estimates apportioned per call from exact output_tokens. ' +
+      'thinking.stepSource = "thinking-blocks" when the transcript records thinking blocks (stepsWithThinking is then exact and the residual is attributed only to those steps); "residual-heuristic" on older transcripts without blocks (every residual counts as thinking — an upper bound).',
     byKind: kinds,
     thinking: topSteps.length ? {
+      stepSource: tracked ? 'thinking-blocks' : 'residual-heuristic',
       storedTokens: Math.round(stored),
       unstoredTokens: Math.round(unstored),
       stepsWithThinking: withThinking,
@@ -512,7 +623,7 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
 // kinds by char share (a call with no content blocks counts as text). Without
 // these rows the consumer table explains only a fraction of peak context and
 // reads as if tool results were the whole story.
-function syntheticConsumers(mainCalls, rate) {
+function syntheticConsumers(mainCalls, rate, tracked) {
   if (!mainCalls.length) return [];
   const n = mainCalls.length;
   const first = mainCalls[0].tokens;
@@ -520,14 +631,20 @@ function syntheticConsumers(mainCalls, rate) {
   const acc = { text: { tok: 0, carried: 0 }, thinking: { tok: 0, carried: 0 } };
   const perTool = new Map(); // tool name → { tok, count }
   let toolTok = 0, toolCarried = 0, toolCount = 0, thinkingCalls = 0;
+  // Last main-step index per turn: prior-turn thinking blocks are stripped from the
+  // API context at the next user turn (kept only inside a turn's tool loop), so
+  // thinking is carried by the remaining steps of ITS turn, not the whole session.
+  const lastOfTurn = new Map();
+  mainCalls.forEach((c, i) => lastOfTurn.set(c.turnIndex, i));
   mainCalls.forEach((c, i) => {
     if (!c.tokens.output) return;
     const f = (n - 1 - i) * rate; // carried $/token for output landing at step i
-    const a = apportionOutput(c);
+    const a = apportionOutput(c, tracked);
     acc.text.tok += a.text; acc.text.carried += a.text * f;
     const think = a.storedThinking + a.unstoredThinking;
-    acc.thinking.tok += think; acc.thinking.carried += think * f;
-    if (think > 0) thinkingCalls += 1;
+    const fThink = (lastOfTurn.get(c.turnIndex) - i) * rate;
+    acc.thinking.tok += think; acc.thinking.carried += think * fThink;
+    if (a.thought && (think > 0 || tracked)) thinkingCalls += 1;
     for (const [name, t] of Object.entries(a.perTool)) {
       toolTok += t.tok; toolCarried += t.tok * f; toolCount += t.count;
       const e = perTool.get(name) || { tok: 0, count: 0 };
@@ -544,7 +661,7 @@ function syntheticConsumers(mainCalls, rate) {
       count: 1, estTokens: baseline, carriedCost: baseline * (n - 1) * rate },
     { tool: 'assistant-text', target: `(the model's prose replies across ${n} steps)`,
       count: n, estTokens: Math.round(acc.text.tok), carriedCost: acc.text.carried },
-    { tool: 'assistant-thinking', target: '(reasoning before answers/tool calls — incl. thinking not stored in the transcript)',
+    { tool: 'assistant-thinking', target: '(reasoning before answers/tool calls — incl. thinking not stored in the transcript; re-read only within its own turn)',
       count: thinkingCalls, estTokens: Math.round(acc.thinking.tok), carriedCost: acc.thinking.carried },
     { tool: 'assistant-tool-calls', target: `(arguments the model wrote into tool calls${toolList ? ' — ' + toolList : ''})`,
       count: toolCount, estTokens: Math.round(toolTok), carriedCost: toolCarried },
@@ -559,7 +676,7 @@ function syntheticConsumers(mainCalls, rate) {
 // the session's blended cache-read rate — what re-reading that content on every
 // later step cost. Estimates (usage data has no per-item attribution); the
 // `note` states that so downstream consumers don't present them as exact.
-function buildConsumers(events, totalSteps, cacheReadRate, extras) {
+function buildConsumers(events, totalSteps, cacheReadRate, extras, peakContext) {
   const byKey = new Map();
   const byTool = new Map();
   let totalEstTokens = 0;
@@ -579,11 +696,22 @@ function buildConsumers(events, totalSteps, cacheReadRate, extras) {
       e.estTokens * Math.max(0, totalSteps - e.afterStep) * cacheReadRate);
   }
   for (const x of extras || []) fold(x.tool, x.target, x.count, x.estTokens, x.carriedCost, x.synthetic);
+  // Whatever the rows can't account for at the peak — tokenizer density (chars/4 is
+  // an estimate), tool-result wrappers, hook-injected system reminders. Sessions
+  // with resets can attribute MORE than the peak (rows sum the whole session), in
+  // which case there is nothing unexplained.
+  const attributed = totalEstTokens;
+  const unexplained = Math.max(0, Math.round((peakContext || 0) - attributed));
+  if (unexplained > 0) fold('unexplained', '(peak context not attributed to any row — token-estimate error, tool-result wrappers, injected reminders)', 1, unexplained, 0, true);
   const desc = (a, b) => b.estTokens - a.estTokens;
   return {
     note: 'estTokens ≈ chars/4 of what landed in main-session context (tool results + user prompts; ' +
       'session-overhead covers the baseline; assistant-text / assistant-thinking / assistant-tool-calls split the model\'s own output by kind, apportioned from exact output_tokens); ' +
-      'carriedCost ≈ estTokens × steps-remaining × blended cache-read rate — what re-reading it on every later step cost. Estimates, not billed figures.',
+      'carriedCost ≈ estTokens × steps-remaining × blended cache-read rate — what re-reading it on every later step cost. Estimates, not billed figures. ' +
+      'unexplained = peak context minus everything attributed — an honesty row, not a consumer.',
+    peakContext: peakContext || 0,
+    attributedTokens: attributed,
+    unexplainedTokens: unexplained,
     totalEstTokens,
     byTool: [...byTool.values()].sort(desc),
     top: [...byKey.values()].sort(desc).slice(0, 30),
@@ -596,6 +724,10 @@ const HIGH_CONTEXT = 200000;
 // A step-to-step cacheRead drop this large marks a context reset (a /compact, a
 // fresh turn that didn't carry prior context, or a /clear).
 const RESET_DROP = 100000;
+// A pause between consecutive main steps longer than this is an idle gap — a natural
+// phase boundary where a /compact would have been cheap (and, past the cache TTL,
+// the cause of a cache rebuild).
+const IDLE_GAP_MS = 5 * 60 * 1000;
 
 // Derived, analysis-ready rollups so a consumer doesn't hand-roll them (and can't
 // cherry-pick a single early call as "the start" or mis-tally tools):
@@ -659,6 +791,30 @@ function buildSummary(main, turns, compactions) {
   const hasBoundaries = compactions.length > 0;
   const manualCompacts = compactions.filter((c) => c.trigger === 'manual').length;
   const autoCompacts = compactions.filter((c) => c.trigger === 'auto').length;
+  // Step shape: the rubric's "fewer, fatter steps". parallelSteps = steps that issued
+  // more than one tool call at once (independent calls batched into one re-read).
+  let toolCalls = 0, stepsWithTools = 0, parallelSteps = 0;
+  for (const c of main) {
+    const k = c.tools.length;
+    toolCalls += k; if (k) stepsWithTools++; if (k > 1) parallelSteps++;
+  }
+  const stepShape = { toolCalls, stepsWithTools, parallelSteps,
+    toolsPerStep: stepsWithTools ? Math.round((toolCalls / stepsWithTools) * 100) / 100 : 0 };
+  // Model switches between consecutive main steps: each one busts the prompt cache
+  // (the whole window is re-written at the cache-write rate).
+  const models = [];
+  let switches = 0;
+  for (let i = 0; i < main.length; i++) {
+    if (!models.includes(main[i].model)) models.push(main[i].model);
+    if (i > 0 && main[i].model !== main[i - 1].model) switches++;
+  }
+  const idleGaps = { count: 0, longestMs: 0, totalMs: 0, thresholdMs: IDLE_GAP_MS };
+  for (let i = 1; i < main.length; i++) {
+    const a = Date.parse(main[i - 1].ts), b = Date.parse(main[i].ts);
+    if (isNaN(a) || isNaN(b)) continue;
+    const g = b - a;
+    if (g > IDLE_GAP_MS) { idleGaps.count++; idleGaps.totalMs += g; if (g > idleGaps.longestMs) idleGaps.longestMs = g; }
+  }
   return {
     durationMs,
     mainSteps: main.length, // main-session billed calls — the denominator the timeline/thinking use (detail.calls also counts subagents)
@@ -685,6 +841,7 @@ function buildSummary(main, turns, compactions) {
     // Claude subscription, ~5min on API keys). count = how many steps re-cached the
     // whole window; extraCost = the cacheWrite $ that bought nothing new.
     cacheRebuilds: { count: rebuildCount, extraCost: rebuildExtraCost },
+    stepShape, modelSwitches: { count: switches, models }, idleGaps,
   };
 }
 

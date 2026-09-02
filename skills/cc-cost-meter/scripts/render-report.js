@@ -168,7 +168,7 @@ function thinkingSummary(ao) {
   return `${compactTokens(th.storedTokens + th.unstoredTokens)} tokens ${money(ao.byKind.thinking.cost)} billed at the output rate — ` +
     `${compactTokens(th.unstoredTokens)} interleaved (billed, never saved to the transcript) + ` +
     `${compactTokens(th.storedTokens)} saved as thinking blocks · ` +
-    `${th.stepsWithThinking}/${th.mainSteps} steps thought · avg ${compactTokens(th.avgPerThinkingStep)}/step · ` +
+    `${th.stepsWithThinking}/${th.mainSteps} steps thought${th.stepSource === 'residual-heuristic' ? ' (estimated — transcript has no thinking blocks)' : ''} · avg ${compactTokens(th.avgPerThinkingStep)}/step · ` +
     `peak ${compactTokens(pk.tokens)} at step ${pk.seq}${(pk.nextTools || []).length ? ' → ' + pk.nextTools.join(', ') : ''}`;
 }
 

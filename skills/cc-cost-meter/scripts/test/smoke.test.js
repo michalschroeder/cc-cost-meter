@@ -48,6 +48,18 @@ const fixture = () => [
       content: [{ type: 'text', text: 'done' }] }, uuid: 'a1' },
 ];
 
+// Build one billed assistant step. `content` blocks default to a single text block.
+function step(id, ts, usage, content, model) {
+  return { type: 'assistant', timestamp: ts, uuid: 'a-' + id,
+    message: { id, role: 'assistant', model: model || 'claude-sonnet-4-6', usage,
+      content: content || [{ type: 'text', text: 'ok' }] } };
+}
+const user = (text, uuid) => ({ type: 'user', message: { role: 'user', content: text }, uuid });
+const toolResult = (toolUseId, text, uuid) => ({ type: 'user', uuid,
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: text }] } });
+const usage = (cacheRead, output, extra) => ({ input_tokens: 0, output_tokens: output,
+  cache_read_input_tokens: cacheRead, cache_creation_input_tokens: 0, ...(extra || {}) });
+
 test('smoke: list payload has the documented top-level keys', async () => {
   const cfg = mkProfile();
   writeTranscript(cfg, 'smoke001', fixture(), 1717200000);
@@ -183,4 +195,334 @@ test('smoke: AskUserQuestion context source carries the question asked', async (
   const out = await runJson(['smoke005'], cfg);
   const mains = out.calls.filter((c) => c.isMain);
   assert.deepStrictEqual(mains[1].contextSources, [{ tool: 'AskUserQuestion', target: 'Pick format A or B?' }]);
+});
+
+// Thinking is attributed only to steps that carry a thinking block. m1 has one
+// (empty text — Claude Code stores the block, not the text); m2 has none, so its
+// output beyond chars/4 is tool-call payload, not reasoning.
+test('smoke: thinking steps counted from thinking blocks, residual only on those steps', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'thinking', thinking: '', signature: 'sig' },
+       { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a b c', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(1200, 600),
+      [{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'pwd' } }]),
+    toolResult('t2', '/x', 'u3'),
+  ];
+  writeTranscript(cfg, 'think001', entries, 1717200000);
+  const out = await runJson(['think001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'thinking-blocks');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.mainSteps, 2);
+  // m1 visible = {"command":"ls"} = 16 chars = 4 tok → 596 unstored thinking
+  assert.strictEqual(th.unstoredTokens, 596);
+  // m2: all 600 output tokens are tool-call payload (scaled up, not thinking)
+  const kinds = out.summary.assistantOutput.byKind;
+  assert.strictEqual(kinds.thinking.tokens, 596);
+  assert.strictEqual(kinds.toolCalls.tokens, 604);
+  // synthetic assistant-thinking consumer row counts 1 thinking step
+  const row = out.summary.contextConsumers.top.find((c) => c.tool === 'assistant-thinking');
+  assert.strictEqual(row.count, 1);
+});
+
+test('smoke: no thinking blocks anywhere → legacy residual heuristic, flagged', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a', 'u2'),
+  ];
+  writeTranscript(cfg, 'think002', entries, 1717200000);
+  const out = await runJson(['think002'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'residual-heuristic');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.unstoredTokens, 596);
+});
+
+// Thinking from turn 1 is not re-read in turn 2 (prior-turn thinking blocks are
+// stripped from context), so its carried cost counts only the remaining steps of
+// its own turn: m1's thinking is carried by m2 only, not by m3/m4.
+test('smoke: assistant-thinking carry is bounded to the turn', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('first', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'thinking', thinking: '', signature: 's' },
+       { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(1100, 4)),
+    user('second', 'u3'),
+    step('m3', '2024-06-01T10:01:00Z', usage(1200, 4)),
+    step('m4', '2024-06-01T10:01:05Z', usage(1300, 4)),
+  ];
+  writeTranscript(cfg, 'carry001', entries, 1717200000);
+  const out = await runJson(['carry001'], cfg);
+  const main = out.calls.filter((c) => c.isMain);
+  const rate = main.reduce((a, c) => a + c.cacheReadCost, 0) / main.reduce((a, c) => a + c.tokens.cacheRead, 0);
+  const row = out.summary.contextConsumers.top.find((c) => c.tool === 'assistant-thinking');
+  assert.strictEqual(row.estTokens, 596);
+  assert.ok(Math.abs(row.carriedCost - 596 * 1 * rate) < 1e-9, `carried ${row.carriedCost} vs ${596 * rate}`);
+});
+
+test('smoke: stepShape, modelSwitches, idleGaps are computed', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50),
+      [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/a' } },
+       { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/b' } }]),
+    toolResult('t1', 'A', 'u2'), toolResult('t2', 'B', 'u3'),
+    step('m2', '2024-06-01T10:20:00Z', usage(1100, 50),
+      [{ type: 'tool_use', id: 't3', name: 'Bash', input: { command: 'ls' } }], 'claude-opus-4-6'),
+    toolResult('t3', 'x', 'u4'),
+    step('m3', '2024-06-01T10:20:10Z', usage(1200, 50), null, 'claude-opus-4-6'),
+  ];
+  writeTranscript(cfg, 'shape001', entries, 1717200000);
+  const out = await runJson(['shape001'], cfg);
+  const s = out.summary;
+  assert.deepStrictEqual(s.stepShape, { toolCalls: 3, stepsWithTools: 2, parallelSteps: 1, toolsPerStep: 1.5 });
+  assert.deepStrictEqual(s.modelSwitches, { count: 1, models: ['claude-sonnet-4-6', 'claude-opus-4-6'] });
+  assert.strictEqual(s.idleGaps.count, 1);
+  assert.strictEqual(s.idleGaps.longestMs, 20 * 60 * 1000);
+  assert.strictEqual(s.idleGaps.totalMs, 20 * 60 * 1000);
+  assert.strictEqual(s.idleGaps.thresholdMs, 5 * 60 * 1000);
+});
+
+// Claude Code writes one content block per JSONL line, all lines sharing the same
+// assistant message.id — a step that thinks then calls tools is 2 lines. Both lines
+// here share id 'm1': line 1 carries the thinking block, line 2 carries 2 tool_use
+// blocks. Merged, this must read as ONE main step with thinking ground truth AND
+// both tool calls — not just the last line's block (the pre-fix keep-last bug).
+test('smoke: assistant content blocks split across lines with the same message id are merged', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50),
+      [{ type: 'thinking', thinking: '', signature: 'sig' }]),
+    step('m1', '2024-06-01T10:00:01Z', usage(1000, 600),
+      [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+       { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'pwd' } }]),
+    toolResult('t1', 'a', 'u2'), toolResult('t2', 'b', 'u3'),
+  ];
+  writeTranscript(cfg, 'split001', entries, 1717200000);
+  const out = await runJson(['split001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'thinking-blocks');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.mainSteps, 1);
+  assert.deepStrictEqual(out.summary.stepShape,
+    { toolCalls: 2, stepsWithTools: 1, parallelSteps: 1, toolsPerStep: 2 });
+});
+
+// Idempotence: some Claude Code versions may write the WHOLE content array on every
+// line instead of splitting it. Two identical lines (same id, same blocks) must not
+// double-count — dedupe on block identity, not just merge blindly.
+test('smoke: repeated identical assistant lines for one message id do not inflate counts', async () => {
+  const cfg = mkProfile();
+  const content = [{ type: 'thinking', thinking: '', signature: 'sig' },
+    { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }];
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50), content),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50), content),
+    toolResult('t1', 'a', 'u2'),
+  ];
+  writeTranscript(cfg, 'dup001', entries, 1717200000);
+  const out = await runJson(['dup001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.mainSteps, 1);
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.deepStrictEqual(out.summary.stepShape,
+    { toolCalls: 1, stepsWithTools: 1, parallelSteps: 0, toolsPerStep: 1 });
+});
+
+// Peak context the consumer rows cannot account for is shown as one honest row
+// instead of silently making the table look complete.
+test('smoke: consumers expose an unexplained row when peak > attributed', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(0, 4, { cache_creation_input_tokens: 50000 })),
+    step('m2', '2024-06-01T10:00:05Z', usage(90000, 4)),
+  ];
+  writeTranscript(cfg, 'unexp001', entries, 1717200000);
+  const out = await runJson(['unexp001'], cfg);
+  const cc = out.summary.contextConsumers;
+  assert.strictEqual(cc.peakContext, 90000);
+  assert.ok(cc.attributedTokens < 90000);
+  assert.strictEqual(cc.unexplainedTokens, 90000 - cc.attributedTokens);
+  assert.strictEqual(cc.totalEstTokens, 90000);
+  const row = cc.top.find((c) => c.tool === 'unexplained');
+  assert.ok(row && row.synthetic && row.carriedCost === 0);
+  assert.strictEqual(row.estTokens, cc.unexplainedTokens);
+});
+
+// Simulated /compact at turn boundaries. Rate = sonnet-4-6 cache-read 3e-7/token.
+// Boundary after turn 1 (ctx 150k): summarization 150k, later steps shrink by 135k
+// each (post = 15k): saving = (160+170+180 − 25−35−45 − 150)k × r = 255k × r.
+// Boundary after turn 2 (ctx 170k): only one later step → negative. So best = turn 1.
+test('smoke: compactionWhatIf finds the best boundary and a policy saving', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(160000, 4)),
+    step('m4', '2024-06-01T10:00:15Z', usage(170000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(180000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif001', entries, 1717200000);
+  const out = await runJson(['whatif001'], cfg);
+  const w = out.summary.compactionWhatIf;
+  const r = 3e-7;
+  assert.strictEqual(w.postTokensAssumed, 15000);
+  assert.strictEqual(w.triggerTokens, 120000);
+  assert.strictEqual(w.best.afterTurn, 1);
+  assert.strictEqual(w.best.afterStep, 2);
+  assert.strictEqual(w.best.contextThen, 150000);
+  assert.ok(Math.abs(w.best.estSaving - 255000 * r) < 1e-9, String(w.best.estSaving));
+  assert.deepStrictEqual(w.policy.atTurns, [1]);
+  assert.strictEqual(w.policy.compactions, 1);
+  assert.ok(Math.abs(w.policy.estSaving - 255000 * r) < 1e-9);
+
+  const av = out.summary.avoidable;
+  assert.ok(Math.abs(av.excessContext - w.policy.estSaving) < 1e-12);
+  assert.ok(Math.abs(av.reducibleThinking - out.summary.assistantOutput.byKind.thinking.cost * 0.5) < 1e-12);
+  assert.strictEqual(av.cacheRebuilds, 0);
+  assert.ok(Math.abs(av.total - (av.excessContext + av.reducibleThinking + av.cacheRebuilds)) < 1e-12);
+  assert.ok(Math.abs(av.share - av.total / out.totalCost) < 1e-12);
+  // 255000×3e-7 = $0.0765 avoidable of ≈ $0.2013 total (670k×3e-7 + 20 out tok) → ~38% → band 2
+  assert.strictEqual(av.band, 2);
+  assert.deepStrictEqual(av.bandThresholds, [0.05, 0.15, 0.30, 0.50]);
+});
+
+test('smoke: compactionWhatIf best is null when no boundary saves money', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    user('t2', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(12000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif002', entries, 1717200000);
+  const out = await runJson(['whatif002'], cfg);
+  assert.strictEqual(out.summary.compactionWhatIf.best, null);
+  assert.strictEqual(out.summary.compactionWhatIf.policy.compactions, 0);
+  assert.ok(out.summary.avoidable.band >= 4);
+});
+
+// --- resumed (cross-cwd) sessions: buildDetail folds several main halves ---------
+// analyze.js only ever passes ONE main file, so the array form is exercised directly.
+const { buildDetail } = require('../lib/session-detail');
+const { loadPricing } = require('../lib/pricing');
+
+function writeRawTranscript(dir, name, entries, when) {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, entries.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  if (when != null) { const d = new Date(when * 1000); fs.utimesSync(file, d, d); }
+  return file;
+}
+const bundledPricing = () => loadPricing(mkProfile(), { allowFetch: false });
+
+// A session resumed under a different cwd has one transcript half per project dir.
+// Turn indices must keep climbing across halves: the second half's pre-prompt calls
+// continue the first half's LAST turn, and its first prompt opens a NEW turn — never
+// turn 0/1 again (which would merge two unrelated turns into one row).
+test('smoke: resumed session numbers turns monotonically across main halves', () => {
+  const cfg = mkProfile();
+  const a = writeRawTranscript(cfg, 'half-a.jsonl', [
+    user('first prompt', 'u1'),
+    step('ma1', '2024-06-01T10:00:00Z', usage(1000, 10)),
+    user('second prompt', 'u2'),
+    step('ma2', '2024-06-01T10:01:00Z', usage(1100, 10)),
+  ], 1717200000);
+  const b = writeRawTranscript(cfg, 'half-b.jsonl', [
+    step('mb0', '2024-06-01T10:02:00Z', usage(1200, 10)), // continuation of turn 2
+    user('third prompt', 'u3'),
+    step('mb1', '2024-06-01T10:03:00Z', usage(1300, 10)),
+  ], 1717200100);
+  const d = buildDetail([a, b], [], bundledPricing());
+  assert.deepStrictEqual(d.turns.map((t) => t.turnIndex), [1, 2, 3]);
+  assert.deepStrictEqual(d.turns.map((t) => t.prompt),
+    ['first prompt', 'second prompt', 'third prompt']);
+  assert.deepStrictEqual(d.turns.map((t) => t.steps), [1, 2, 1]);
+  assert.deepStrictEqual(d.perCall.map((c) => c.turnIndex), [1, 2, 2, 3]);
+});
+
+// The counterfactual must not claim savings the session already banked: a real
+// /compact mid-session shrinks the window itself, so a simulated compaction before
+// it cannot keep "removing" tokens that are already gone.
+test('smoke: compactionWhatIf claims nothing after a real reset (drop heuristic)', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(60000, 4)),  // real /compact happened here
+    step('m4', '2024-06-01T10:00:15Z', usage(80000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(100000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif003', entries, 1717200000);
+  const out = await runJson(['whatif003'], cfg);
+  const w = out.summary.compactionWhatIf;
+  assert.strictEqual(w.best, null);
+  assert.strictEqual(w.policy.estSaving, 0);
+  assert.strictEqual(w.resetSource, 'token-drop-heuristic');
+  assert.strictEqual(out.summary.avoidable.excessContext, 0);
+});
+
+// With compact_boundary records the simulator uses them (authoritative, like
+// buildSummary) instead of the drop heuristic — a real compaction too small for the
+// 100k drop threshold still ends a simulated compaction's effect, and the records'
+// median postTokens replaces the 15000 default.
+test('smoke: compactionWhatIf uses compact_boundary records for resets and postTokens', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    { type: 'system', subtype: 'compact_boundary', timestamp: '2024-06-01T10:00:07Z',
+      compactMetadata: { trigger: 'manual', preTokens: 150000, postTokens: 30000 } },
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(130000, 4)),
+    step('m4', '2024-06-01T10:00:15Z', usage(140000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(160000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif004', entries, 1717200000);
+  const out = await runJson(['whatif004'], cfg);
+  const w = out.summary.compactionWhatIf;
+  assert.strictEqual(w.best, null);
+  assert.strictEqual(w.policy.estSaving, 0);
+  assert.strictEqual(w.postTokensAssumed, 30000);
+  assert.strictEqual(w.resetSource, 'compact_boundary');
+});
+
+// avoidable.cacheRebuilds is the cacheWrite spent re-caching an expired window
+// (context total holds, the re-read part collapses) — it must reach the grade anchor.
+test('smoke: avoidable counts cache rebuilds after an idle gap', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(150000, 4)),
+    step('m2', '2024-06-01T11:30:00Z', usage(0, 4, { cache_creation_input_tokens: 150000 })),
+  ];
+  writeTranscript(cfg, 'rebuild001', entries, 1717200000);
+  const out = await runJson(['rebuild001'], cfg);
+  const s = out.summary;
+  assert.strictEqual(s.cacheRebuilds.count, 1);
+  assert.ok(s.cacheRebuilds.extraCost > 0);
+  assert.strictEqual(s.avoidable.cacheRebuilds, s.cacheRebuilds.extraCost);
+  assert.ok(Math.abs(s.avoidable.total -
+    (s.avoidable.excessContext + s.avoidable.reducibleThinking + s.avoidable.cacheRebuilds)) < 1e-12);
 });

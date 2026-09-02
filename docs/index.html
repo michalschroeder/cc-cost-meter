@@ -13,7 +13,8 @@
     HIGH_CTX_CALLS   summary.highContextCost.calls
     CONTEXT_RESETS   summary.contextResets
     PEAK_CONTEXT     summary.contextGrowth.peakContext → "Nk"
-    CONTEXT_TIMELINE inline SVG — one bar per main-session step (from calls[]), height = context size
+    CONTEXT_TIMELINE inline SVG — one bar per main-session step (from calls[]): tier-colored re-read base + hatched written cap, total height = context size; ↻ marks a cache rebuild
+    CACHE_REBUILD_CALLOUT  warning card under the chart when summary.cacheRebuilds.count > 0 (empty otherwise)
     CONTEXT_GROWTH_BAR inline SVG — horizontal bar, one segment per turn, width = context growth
     WHERE_IT_WENT_ROWS  one <tr> per components entry: <td>label</td><td>$cost</td><td><bar></td>
     CONSUMER_TOOL_ROWS  one <tr> per summary.contextConsumers.byTool entry (tool, count, est tokens, carried cost, share)
@@ -25,7 +26,7 @@
     SKILL_ROWS          one <tr> per summary.bySkill entry (skill, turns, steps, cost)
     BY_MODEL_ROWS       one <tr> per byModel entry
     TOP_TURNS_ROWS      one <tr> per top turn (cost, kind, skill, peak ctx, what)
-    SUBAGENT_ROWS       one <tr> per byAgent entry (task, cost) — placeholder row if none
+    SUBAGENT_ROWS       one <tr> per byAgent entry (task, steps, cost) — placeholder row if none
     RATING_BADGE        the 1–5 session grade badge (colored by rating); empty when unrated
     ASSESS_CARDS        one verdict-tinted .acard per finding (WHAT/WHY/HOW blocks) from the
                         model's assessment; empty placeholder when none was merged
@@ -63,9 +64,9 @@
        step, kept slightly muted so it still reads as flat 90s catalog ink rather
        than neon. Dell red (#e91d2a, the CTA/total accent) stays off the chart; the
        danger tier uses its own brick red. */
-    --c-low:#5f9e3f; --c-mid:#e8a01e; --c-high:#c0392b;
-    --c-user:var(--t-sky); --c-skill:var(--t-periwinkle); --c-orch:var(--t-olive);
-    --c-start:var(--t-steel); --c-dim:#d9d6c4;
+    --c-low:#5f9e3f; --c-mid:#c8890f; --c-high:#c0392b;
+    --c-user:#5f93b3; --c-skill:var(--t-periwinkle); --c-orch:var(--t-olive);
+    --c-start:#9aa0a6; --c-dim:#d9d6c4;
     --font-display:"Arial Black","Helvetica Neue",Helvetica,Arial,sans-serif;
     --font-head:"Helvetica Neue",Helvetica,Arial,sans-serif;
     --font-body:"Times New Roman",Times,Georgia,serif;
@@ -79,10 +80,17 @@
   svg .zone-mid{fill:var(--c-mid)} svg .zone-high{fill:var(--c-high)}
   svg .grid{stroke:#999} svg .grid-warn{stroke:var(--red)}
   svg .reset-line{stroke:var(--red)} svg .divider{stroke:var(--ink)}
+  /* Written cap = hatched slate (a one-time cache write), distinct from the solid
+     tier-colored re-read base. ↻ marks a step that re-wrote the whole window. */
+  svg .ctx-written{fill:url(#ctx-hatch)} svg .ctx-rebuild{fill:#3c4654;font-size:13px;
+    font-family:var(--font-head);cursor:help}
   .ctx-legend i.c-low{background:var(--c-low)} .ctx-legend i.c-mid{background:var(--c-mid)}
   .ctx-legend i.c-high{background:var(--c-high)} .ctx-legend i.c-user{background:var(--c-user)}
   .ctx-legend i.c-skill{background:var(--c-skill)} .ctx-legend i.c-orch{background:var(--c-orch)}
   .ctx-legend i.c-start{background:var(--c-start)} .ctx-legend i.c-dim{background:var(--c-dim)}
+  .ctx-legend i.ctx-written{background:repeating-linear-gradient(45deg,#5b6675 0 3px,#3c4654 3px 5px)}
+  .ctx-legend i.rebuild{background:transparent;border:0;width:auto;margin-right:5px;
+    color:#3c4654;font-style:normal;font-size:17px;line-height:1}
   * { box-sizing: border-box; }
   html { scroll-behavior:smooth; }
 
@@ -257,12 +265,18 @@
   .ctx-seg:hover { opacity:.7; }
   .ctx-bar, .ctx-seg { cursor:crosshair; }
   .ctx-legend i.reset { background:transparent; border:0; border-left:2px dashed var(--red); width:3px; }
+  /* Deterministic warning card under the chart (cache-rebuild advice). */
+  .callout { border:1px solid var(--frame); border-left:5px solid #cf9b0a; background:#f7eecb;
+    margin:14px 0 0; padding:0 0 12px; overflow-wrap:anywhere; }
+  .callout-h { font-family:var(--font-head); font-weight:700; font-size:15px; letter-spacing:.02em;
+    color:var(--ink); padding:11px 16px; background:#e9d08a; border-bottom:1px solid var(--frame); }
+  .callout p { margin:10px 16px 0; font-family:var(--font-body); font-size:16px; color:#222; }
 
   /* Floating hover tooltip styled as a catalog "sticker": white card, 1px black
      border, hard bevel (never a soft shadow), zero radius, yellow Helvetica-caps
      header. Follows the cursor; replaces the browser's slow native title popup. */
   .tip { position:fixed; top:0; left:0; z-index:100; pointer-events:none;
-    max-width:360px; background:var(--canvas); color:var(--ink);
+    max-width:520px; background:var(--canvas); color:var(--ink);
     border:1px solid var(--frame); box-shadow:4px 4px 0 #000;
     opacity:0; transition:opacity .08s ease-out; will-change:transform; }
   .tip.show { opacity:1; }
@@ -275,6 +289,11 @@
   .tip .tip-meta { font-family:var(--font-head); font-size:12px; color:#333; padding:6px 11px 0; }
   .tip .tip-b { font-family:var(--font-body); font-size:14.5px; line-height:1.4; color:#222;
     padding:7px 11px 10px; }
+  /* One source per line under "new in context", hanging-indented with a bullet so a
+     long command or message wraps under itself instead of colliding with the next. */
+  .tip .tip-src { font-family:var(--font-body); font-size:13.5px; line-height:1.35;
+    color:#222; padding:3px 0 0 18px; text-indent:-9px; word-break:break-word; }
+  .tip .tip-src::before { content:"• "; }
   .prompt { font-family:var(--font-body); color:#333; }
   /* Small-print notes under tables (estimate disclaimer, thinking headline). */
   p.note { font-family:var(--font-body); color:#333; font-size:13px; }
@@ -386,33 +405,44 @@
   large context, because what you paid for was re-reading the window it ran in, not the words you
   typed. So treat each card as a place to look, confirm it against the tables above, and act on the
   structural lever (a smaller context) before the cosmetic one (longer prompts).</p>
-  <div class="assess"><div class="acard acard-good"><div class="acard-title">Offloaded the exploration to subagents</div><div class="ablk"><span class="alabel">What</span><span class="atext">Two subagents ($0.22 + $0.19) mapped every caller of the old token helper and drafted the migration in an isolated worktree, so the bulky search output never piled up in the main window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Subagent context is thrown away when they return — only their conclusions came back, so the main session stayed lean while the heavy reading happened elsewhere.</span></div><div class="ablk"><span class="alabel">Keep it up</span><span class="atext">Keep dispatching exploration and codebase-mapping to subagents; it&#39;s the single biggest reason the first half of this session was cheap.</span></div></div>
+  <div class="assess"><div class="acard acard-warn"><div class="acard-title">Prompt cache expired mid-session</div><div class="ablk"><span class="alabel">What</span><span class="atext">The session was idle long enough that the prompt cache expired and had to be re-written once, costing about $1.70 extra.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">The cache lets every step re-read the conversation cheaply. After an idle gap (~1h on a Claude subscription, ~5min on API keys) it expires, and the next step pays to re-cache the whole window.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.</span></div></div>
+<div class="acard acard-good"><div class="acard-title">Offloaded the exploration to subagents</div><div class="ablk"><span class="alabel">What</span><span class="atext">Two subagents ($0.22 + $0.19) mapped every caller of the old token helper and drafted the migration in an isolated worktree, so the bulky search output never piled up in the main window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Subagent context is thrown away when they return — only their conclusions came back, so the main session stayed lean while the heavy reading happened elsewhere.</span></div><div class="ablk"><span class="alabel">Keep it up</span><span class="atext">Keep dispatching exploration and codebase-mapping to subagents; it&#39;s the single biggest reason the first half of this session was cheap.</span></div></div>
 <div class="acard acard-bad"><div class="acard-title">The test loop re-read a 214k context every step</div><div class="ablk"><span class="alabel">What</span><span class="atext">The final &#39;fix the failing test&#39; turn climbed to 214k tokens of context and cost $0.93 — over a quarter of the session — across a red/green loop where each npm test run&#39;s full output stayed in the window.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Every step re-reads the entire conversation (the cache-read line, $1.43 of the $3.18 total). Once the window is that large, each additional test run is billed against all 214k tokens, not just the new output.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">When a test loop drags on past a few iterations, run /compact to drop the stale earlier output, or ask a subagent to run the failing test and report only pass/fail plus the relevant error — don&#39;t keep full test logs in the main window.</span></div></div>
 <div class="acard acard-warn"><div class="acard-title">Reasoning concentrated on one step</div><div class="ablk"><span class="alabel">What</span><span class="atext">Thinking was 58k tokens / $0.62 of output, and step 11 alone burned 9.8k of it right after a test run.</span></div><div class="ablk"><span class="alabel">Why</span><span class="atext">Big context plus an ambiguous failure makes the model reason longer before acting; that thinking is billed at the output rate and most of it (49k) is interleaved, so it never even shows up in the transcript.</span></div><div class="ablk"><span class="alabel">How to fix</span><span class="atext">Give the model a sharper target before a heavy step — paste the exact failing assertion and file rather than &#39;fix the failing test&#39; — so it spends fewer tokens re-deriving what&#39;s wrong.</span></div></div></div>
   </section>
 
   <h2 id="context" class="tint-olive">Context window over time</h2>
-  <p class="explain">One bar per step, left to right in time order. The height of a bar is how
-  full the conversation was at that moment, measured in tokens (roughly, pieces of words).
-  Because every step re-reads everything before it, <strong>taller bars cost more</strong>.
-  Green bars are a comfortable size (under 100k tokens). Amber is getting heavy. Red is past
-  the dashed 200k line, which is the expensive zone the "spent above 200k" card adds up. The
-  blue ticks under the bottom line show where your messages landed. When a bar suddenly drops
-  back to almost nothing, that is a /compact or a context clear emptying the conversation. The
-  healthy pattern is a zig-zag: fill up, clear, fill up again. One long climb that stays red
-  means every later step was paying the highest re-reading cost. Hover over any bar to see that
-  step's size, cost, and the message it was working on.</p>
-  <svg class="ctx-chart" viewBox="0 0 860 210" role="img" aria-label="context window size per step"><rect class="ctx-zone zone-high" x="44" y="10.0" width="810.0" height="41.1"/><rect class="ctx-zone zone-mid" x="44" y="51.1" width="810.0" height="68.5"/><rect class="ctx-zone zone-low" x="44" y="119.5" width="810.0" height="68.5"/><line x1="44" y1="119.5" x2="854" y2="119.5" class="grid" stroke-dasharray="4 4"/><text x="2" y="122.5" class="ctx-axis">100k</text><line x1="44" y1="51.1" x2="854" y2="51.1" class="grid-warn" stroke-dasharray="4 4"/><text x="2" y="54.1" class="ctx-axis">200k</text><rect class="ctx-turn c-user" x="52.1" y="191" width="64.80" height="5"><title>Refactor the auth module to use the new token service and add tests</title></rect><rect class="ctx-bar c-low" x="52.1" y="170.9" width="64.80" height="17.1" data-step="1" data-ctx="25k" data-cost="$0.12" data-prompt="Refactor the auth module to use the new token service and add tests"><title>step 1 · 25k context · $0.12</title></rect><rect class="ctx-bar c-low" x="133.1" y="159.2" width="64.80" height="28.8" data-step="2" data-ctx="42k" data-cost="$0.10" data-prompt="Refactor the auth module to use the new token service and add tests"><title>step 2 · 42k context · $0.10</title></rect><rect class="ctx-bar c-low" x="214.1" y="146.2" width="64.80" height="41.8" data-step="3" data-ctx="61k" data-cost="$0.11" data-prompt="Refactor the auth module to use the new token service and add tests"><title>step 3 · 61k context · $0.11</title></rect><rect class="ctx-turn c-dim" x="295.1" y="191" width="64.80" height="5"><title>Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ...</title></rect><rect class="ctx-bar c-low" x="295.1" y="134.6" width="64.80" height="53.4" data-step="4" data-ctx="78k" data-cost="$0.18" data-prompt="Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ..."><title>step 4 · 78k context · $0.18</title></rect><rect class="ctx-bar c-low" x="376.1" y="122.3" width="64.80" height="65.7" data-step="5" data-ctx="96k" data-cost="$0.20" data-prompt="Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ..."><title>step 5 · 96k context · $0.20</title></rect><rect class="ctx-turn c-dim" x="457.1" y="191" width="64.80" height="5"><title>&lt;task-notification&gt; subagent results</title></rect><rect class="ctx-bar c-mid" x="457.1" y="97.6" width="64.80" height="90.4" data-step="6" data-ctx="132k" data-cost="$0.24" data-prompt="&lt;task-notification&gt; subagent results"><title>step 6 · 132k context · $0.24</title></rect><rect class="ctx-bar c-mid" x="538.1" y="79.8" width="64.80" height="108.2" data-step="7" data-ctx="158k" data-cost="$0.30" data-prompt="&lt;task-notification&gt; subagent results"><title>step 7 · 158k context · $0.30</title></rect><rect class="ctx-turn c-user" x="619.1" y="191" width="64.80" height="5"><title>fix the failing integration test</title></rect><rect class="ctx-bar c-mid" x="619.1" y="59.3" width="64.80" height="128.7" data-step="8" data-ctx="188k" data-cost="$0.34" data-prompt="fix the failing integration test"><title>step 8 · 188k context · $0.34</title></rect><rect class="ctx-bar c-high" x="700.1" y="41.5" width="64.80" height="146.5" data-step="9" data-ctx="214k" data-cost="$0.41" data-prompt="fix the failing integration test"><title>step 9 · 214k context · $0.41</title></rect><line x1="781.1" y1="10" x2="781.1" y2="188" class="reset-line" stroke-dasharray="2 3"><title>context dropped 214k → 96k — /compact, context clear, or a cache rebuild</title></line><rect class="ctx-bar c-low" x="781.1" y="122.3" width="64.80" height="65.7" data-step="10" data-ctx="96k" data-cost="$0.18" data-prompt="fix the failing integration test"><title>step 10 · 96k context · $0.18</title></rect><line x1="44" y1="188" x2="854" y2="188" class="grid"/></svg>
+  <p class="explain">One bar per step, left to right in time order. The full height of a bar is
+  how big the conversation was at that moment, in tokens (roughly, pieces of words). Because every
+  step re-reads everything before it, <strong>taller bars cost more</strong>. Each bar has two
+  parts: a solid <strong>re-read</strong> base — context already cached, read back cheaply, colored
+  green / amber / red by size — and a hatched <strong>written</strong> cap on top: new material
+  cached that step. Normally the cap is thin. When it suddenly fills the whole bar, the prompt cache
+  expired (after a long idle gap) and that step had to re-write the entire window from scratch —
+  marked with a ↻ below. That is <em>not</em> the conversation shrinking; the height stays the same,
+  it just turns all-written. A dashed red line is the real thing: a /compact or clear where the
+  total actually dropped. The axis underneath shows minutes from the start, so you can see where the
+  long gaps were. Hover any bar for its split, cost, and the message it was working on.</p>
+  <svg class="ctx-chart" viewBox="0 0 860 224" role="img" aria-label="context window size per step"><defs><pattern id="ctx-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#5b6675"/><line x1="0" y1="0" x2="0" y2="5" stroke="#3c4654" stroke-width="2"/></pattern></defs><rect class="ctx-zone zone-high" x="44" y="10.0" width="810.0" height="41.1"/><rect class="ctx-zone zone-mid" x="44" y="51.1" width="810.0" height="68.5"/><rect class="ctx-zone zone-low" x="44" y="119.5" width="810.0" height="68.5"/><line x1="44" y1="119.5" x2="854" y2="119.5" class="grid" stroke-dasharray="4 4"/><text x="2" y="122.5" class="ctx-axis">100k</text><line x1="44" y1="51.1" x2="854" y2="51.1" class="grid-warn" stroke-dasharray="4 4"/><text x="2" y="54.1" class="ctx-axis">200k</text><rect class="ctx-turn c-user" x="52.1" y="191" width="64.80" height="5"><title>Refactor the auth module to use the new token service and add tests</title></rect><rect class="ctx-bar ctx-written" x="52.1" y="164.4" width="64.80" height="6.5" data-step="1" data-cached="25k" data-written="10k" data-total="35k" data-cost="$0.12" data-mins="0m"/><rect class="ctx-bar c-low" x="52.1" y="170.9" width="64.80" height="17.1" data-step="1" data-cached="25k" data-written="10k" data-total="35k" data-cost="$0.12" data-mins="0m" data-tools="Read ×2 · Grep" data-source="session startup (system prompt + tool defs) (~5k) · Read token-service.js · Read session.js · Grep: verifyToken"><title>step 1 · 35k context (25k re-read + 10k written) · $0.12 · +0m — ran Read ×2 · Grep; new in context: session startup (system prompt + tool defs) (~5k) · Read token-service.js · Read session.js · Grep: verifyToken</title></rect><rect class="ctx-bar ctx-written" x="133.1" y="156.5" width="64.80" height="2.7" data-step="2" data-cached="42k" data-written="4k" data-total="46k" data-cost="$0.10" data-mins="2m"/><rect class="ctx-bar c-low" x="133.1" y="159.2" width="64.80" height="28.8" data-step="2" data-cached="42k" data-written="4k" data-total="46k" data-cost="$0.10" data-mins="2m" data-tools="Edit · Bash" data-source="the model&#39;s previous reply (~3k) · Bash: npm test -- auth.spec.ts"><title>step 2 · 46k context (42k re-read + 4k written) · $0.10 · +2m — ran Edit · Bash; new in context: the model&#39;s previous reply (~3k) · Bash: npm test -- auth.spec.ts</title></rect><rect class="ctx-bar ctx-written" x="214.1" y="144.2" width="64.80" height="2.1" data-step="3" data-cached="61k" data-written="3k" data-total="64k" data-cost="$0.11" data-mins="4m"/><rect class="ctx-bar c-low" x="214.1" y="146.2" width="64.80" height="41.8" data-step="3" data-cached="61k" data-written="3k" data-total="64k" data-cost="$0.11" data-mins="4m"><title>step 3 · 64k context (61k re-read + 3k written) · $0.11 · +4m</title></rect><rect class="ctx-turn c-dim" x="295.1" y="191" width="64.80" height="5"><title>Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ...</title></rect><rect class="ctx-bar ctx-written" x="295.1" y="130.5" width="64.80" height="4.1" data-step="4" data-cached="78k" data-written="6k" data-total="84k" data-cost="$0.18" data-mins="6m"/><rect class="ctx-bar c-low" x="295.1" y="134.6" width="64.80" height="53.4" data-step="4" data-cached="78k" data-written="6k" data-total="84k" data-cost="$0.18" data-mins="6m"><title>step 4 · 84k context (78k re-read + 6k written) · $0.18 · +6m</title></rect><rect class="ctx-bar ctx-written" x="376.1" y="120.2" width="64.80" height="2.1" data-step="5" data-cached="96k" data-written="3k" data-total="99k" data-cost="$0.20" data-mins="8m"/><rect class="ctx-bar c-low" x="376.1" y="122.3" width="64.80" height="65.7" data-step="5" data-cached="96k" data-written="3k" data-total="99k" data-cost="$0.20" data-mins="8m"><title>step 5 · 99k context (96k re-read + 3k written) · $0.20 · +8m</title></rect><rect class="ctx-turn c-dim" x="457.1" y="191" width="64.80" height="5"><title>&lt;task-notification&gt; subagent results</title></rect><rect class="ctx-bar ctx-written" x="457.1" y="94.2" width="64.80" height="3.4" data-step="6" data-cached="132k" data-written="5k" data-total="137k" data-cost="$0.24" data-mins="10m"/><rect class="ctx-bar c-mid" x="457.1" y="97.6" width="64.80" height="90.4" data-step="6" data-cached="132k" data-written="5k" data-total="137k" data-cost="$0.24" data-mins="10m"><title>step 6 · 137k context (132k re-read + 5k written) · $0.24 · +10m</title></rect><text x="538.1" y="207.0" class="ctx-rebuild" text-anchor="middle">↻<title>cache rebuilt: 1h35m idle gap expired the prompt cache, so this step re-wrote the whole 159k window (cost +$1.70). Cache holds ~1h on a subscription, ~5min on API keys.</title></text><rect class="ctx-bar ctx-written" x="538.1" y="79.1" width="64.80" height="102.7" data-step="7" data-cached="9k" data-written="150k" data-total="159k" data-cost="$1.82" data-mins="1h45m"/><rect class="ctx-bar c-low" x="538.1" y="181.8" width="64.80" height="6.2" data-step="7" data-cached="9k" data-written="150k" data-total="159k" data-cost="$1.82" data-mins="1h45m"><title>step 7 · 159k context (9k re-read + 150k written) · $1.82 · +1h45m</title></rect><rect class="ctx-turn c-user" x="619.1" y="191" width="64.80" height="5"><title>fix the failing integration test</title></rect><rect class="ctx-bar ctx-written" x="619.1" y="57.2" width="64.80" height="2.1" data-step="8" data-cached="188k" data-written="3k" data-total="191k" data-cost="$0.34" data-mins="1h47m"/><rect class="ctx-bar c-mid" x="619.1" y="59.3" width="64.80" height="128.7" data-step="8" data-cached="188k" data-written="3k" data-total="191k" data-cost="$0.34" data-mins="1h47m"><title>step 8 · 191k context (188k re-read + 3k written) · $0.34 · +1h47m</title></rect><rect class="ctx-bar ctx-written" x="700.1" y="40.1" width="64.80" height="1.4" data-step="9" data-cached="214k" data-written="2k" data-total="216k" data-cost="$0.41" data-mins="1h49m"/><rect class="ctx-bar c-high" x="700.1" y="41.5" width="64.80" height="146.5" data-step="9" data-cached="214k" data-written="2k" data-total="216k" data-cost="$0.41" data-mins="1h49m"><title>step 9 · 216k context (214k re-read + 2k written) · $0.41 · +1h49m</title></rect><line x1="781.1" y1="10" x2="781.1" y2="188" class="reset-line" stroke-dasharray="2 3"><title>context dropped 216k → 101k — a /compact or context clear</title></line><rect class="ctx-bar ctx-written" x="781.1" y="118.9" width="64.80" height="3.4" data-step="10" data-cached="96k" data-written="5k" data-total="101k" data-cost="$0.18" data-mins="1h51m"/><rect class="ctx-bar c-low" x="781.1" y="122.3" width="64.80" height="65.7" data-step="10" data-cached="96k" data-written="5k" data-total="101k" data-cost="$0.18" data-mins="1h51m"><title>step 10 · 101k context (96k re-read + 5k written) · $0.18 · +1h51m</title></rect><line x1="44" y1="188" x2="854" y2="188" class="grid"/><text x="52.1" y="219.0" class="ctx-axis" text-anchor="start">+0m</text><text x="214.1" y="219.0" class="ctx-axis" text-anchor="middle">+4m</text><text x="457.1" y="219.0" class="ctx-axis" text-anchor="middle">+10m</text><text x="619.1" y="219.0" class="ctx-axis" text-anchor="middle">+1h47m</text><text x="781.1" y="219.0" class="ctx-axis" text-anchor="end">+1h51m</text></svg>
   <div class="ctx-legend">
-    <span><i class="c-low"></i>under 100k (comfortable)</span>
-    <span><i class="c-mid"></i>100k to 200k (getting heavy)</span>
-    <span><i class="c-high"></i>above 200k (time to clear the conversation)</span>
+    <span><i class="c-low"></i>re-read, under 100k (comfortable)</span>
+    <span><i class="c-mid"></i>re-read, 100k to 200k (getting heavy)</span>
+    <span><i class="c-high"></i>re-read, above 200k (time to clear)</span>
+    <span><i class="ctx-written"></i>written this step (new cache)</span>
     <span><i class="c-user"></i>where your message landed</span>
-    <span><i class="c-dim"></i>a skill or helper started</span>
-    <span><i class="reset"></i>conversation cleared: the dashed line marks a point where the
-    conversation suddenly shrank, from a /compact, a manual clear, or the saved copy being rebuilt</span>
+    <span><i class="rebuild">↻</i>cache expired &amp; re-written (a long idle gap)</span>
+    <span><i class="reset"></i>conversation actually cleared (/compact or clear: the total dropped)</span>
   </div>
   <div id="ctx-readout">hover a bar to inspect a step</div>
+  <div class="callout callout-warn">
+    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache once</div>
+    <p>The prompt cache holds the conversation so each step re-reads it cheaply. It expires after
+    an idle gap — about <strong>1 hour on a Claude subscription</strong> (5 minutes on API-key usage).
+    When that happens the next step has to re-write the whole window from scratch, which cost roughly
+    <strong>$1.70</strong> here and bought nothing new. Those are the ↻ marks on
+    the chart. To avoid it: <strong>/compact or /clear at a natural break</strong> before stepping away,
+    or split a very long session into shorter ones.</p>
+  </div>
 
   <h3>The same growth, grouped by message: who added what</h3>
   <p class="explain">The chart above uses many bars for a single message. This one is simpler:
@@ -424,7 +454,7 @@
   re-read. Wide blocks are the messages that made the session expensive. A black dashed line is a
   /compact or context clear wiping it back down. Hover over a block to see the message, how far it
   pushed the conversation (from one size to the next), and what that turn cost.</p>
-  <svg class="ctx-growbar" viewBox="0 0 860 56" role="img" aria-label="context growth grouped by turn"><rect class="ctx-seg c-dim" x="2.0" y="6" width="149.5" height="26" data-kind="overhead" data-grow="35k" data-from="0" data-to="35k" data-steps="0" data-cost="$0.00" data-prompt="session start — system prompt, tool definitions, project context"><title>session start — system prompt, tool definitions, project context · 35k</title></rect><rect class="ctx-seg c-user" x="151.5" y="6" width="229.7" height="26" data-kind="user" data-grow="53k" data-from="25k" data-to="78k" data-steps="3" data-cost="$0.33" data-prompt="Refactor the auth module to use the new token service and add tests"><title>Refactor the auth module to use the new token service and add tests — grew context 25k → 78k (+53k) · 3 steps · $0.33</title></rect><rect class="ctx-seg c-skill" x="381.2" y="6" width="234.0" height="26" data-kind="skill" data-grow="54k" data-from="78k" data-to="132k" data-steps="2" data-cost="$0.38" data-prompt="Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ..."><title>Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ... — grew context 78k → 132k (+54k) · 2 steps · $0.38</title></rect><rect class="ctx-seg c-orch" x="615.3" y="6" width="242.7" height="26" data-kind="subagent-orchestration" data-grow="56k" data-from="132k" data-to="188k" data-steps="2" data-cost="$0.54" data-prompt="&lt;task-notification&gt; subagent results"><title>&lt;task-notification&gt; subagent results — grew context 132k → 188k (+56k) · 2 steps · $0.54</title></rect><text x="2" y="52" class="ctx-axis">0</text><text x="858" y="52" class="ctx-axis" text-anchor="end">+198k total context added</text></svg>
+  <svg class="ctx-growbar" viewBox="0 0 860 56" role="img" aria-label="context growth grouped by turn"><rect class="ctx-seg c-dim" x="2.0" y="6" width="149.5" height="26" data-kind="overhead" data-grow="35k" data-from="0" data-to="35k" data-steps="0" data-cost="$0.00" data-prompt="session start — system prompt, tool definitions, project context"><title>session start — system prompt, tool definitions, project context · 35k</title></rect><rect class="ctx-seg c-user" x="151.5" y="6" width="229.7" height="26" data-kind="user" data-grow="53k" data-from="25k" data-to="78k" data-steps="3" data-cost="$0.33" data-prompt="Refactor the auth module to use the new token service and add tests"><title>Refactor the auth module to use the new token service and add tests — grew context 25k → 78k (+53k) · 3 steps · $0.33</title></rect><rect class="ctx-seg c-skill" x="381.2" y="6" width="234.0" height="26" data-kind="skill" data-grow="54k" data-from="78k" data-to="132k" data-steps="2" data-cost="$0.38" data-prompt="Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ..."><title>Base directory for this skill: /home/u/.claude/skills/test-driven-development # Test Driven Development ... — grew context 78k → 132k (+54k) · 2 steps · $0.38</title></rect><rect class="ctx-seg c-orch" x="615.3" y="6" width="242.7" height="26" data-kind="subagent-orchestration" data-grow="56k" data-from="132k" data-to="188k" data-steps="2" data-cost="$2.06" data-prompt="&lt;task-notification&gt; subagent results"><title>&lt;task-notification&gt; subagent results — grew context 132k → 188k (+56k) · 2 steps · $2.06</title></rect><text x="2" y="52" class="ctx-axis">0</text><text x="858" y="52" class="ctx-axis" text-anchor="end">+198k total context added</text></svg>
   <div class="ctx-legend">
     <span><i class="c-dim"></i>fixed setup</span>
     <span><i class="c-user"></i>your message</span>
@@ -459,9 +489,10 @@
   down your main chat.</p>
   <h3>By tool — where it came from</h3>
   <table><thead><tr><th scope="col" data-sort="text">tool</th><th scope="col" class="num" data-sort="num" data-sum="int">results</th><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col">share</th></tr></thead>
-  <tbody><tr><td>Read</td><td class="num">6</td><td class="num">52k</td><td class="num">$0.78</td><td><div class="bar" style="width:54%"></div></td></tr>
-<tr><td>Bash</td><td class="num">5</td><td class="num">26k</td><td class="num">$0.34</td><td><div class="bar" style="width:27%"></div></td></tr>
-<tr><td>Grep</td><td class="num">4</td><td class="num">18k</td><td class="num">$0.21</td><td><div class="bar" style="width:19%"></div></td></tr></tbody></table>
+  <tbody><tr><td>unexplained</td><td class="num">1</td><td class="num">118k</td><td class="num">$0.00</td><td><div class="bar" style="width:55%"></div></td></tr>
+<tr><td>Read</td><td class="num">6</td><td class="num">52k</td><td class="num">$0.78</td><td><div class="bar" style="width:24%"></div></td></tr>
+<tr><td>Bash</td><td class="num">5</td><td class="num">26k</td><td class="num">$0.34</td><td><div class="bar" style="width:12%"></div></td></tr>
+<tr><td>Grep</td><td class="num">4</td><td class="num">18k</td><td class="num">$0.21</td><td><div class="bar" style="width:8%"></div></td></tr></tbody></table>
   <h3>Item by item — the exact file, command, or message</h3>
   <p class="explain">A <strong>×3</strong> after a tool name means the same thing landed three times;
   a file read three times costs its full size three times over, plus the repeat charge for keeping each
@@ -470,10 +501,11 @@
   (assistant-tool-calls). When those rows are near the top, the cost came mostly from how much the
   model itself wrote, not from what it read.</p>
   <table id="consumers-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col">share</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col" data-sort="text">tool</th><th scope="col">target (file · command · prompt)</th></tr></thead>
-  <tbody><tr><td class="num">31k</td><td><div class="bar" style="width:32%"></div></td><td class="num">$0.46</td><td>Read ×3</td><td class="prompt has-tip" data-tip-h="Read target" data-full="/repo/src/auth/token-service.ts">The new token-service module the refactor targets — re-read on every step because the implementation kept referring back to its full surface area.</td></tr>
-<tr><td class="num">22k</td><td><div class="bar" style="width:23%"></div></td><td class="num">$0.29</td><td>Bash ×4</td><td class="prompt has-tip" data-tip-h="Bash target" data-full="npm test -- auth">The auth test-suite run, repeated through the red/green loop — each full run&#39;s output stayed in context and was re-read by later steps.</td></tr>
-<tr><td class="num">19k</td><td><div class="bar" style="width:20%"></div></td><td class="num">$0.24</td><td>Read ×2</td><td class="prompt has-tip" data-tip-h="Read target" data-full="/repo/src/auth/legacy-token-helper.ts">The old in-process token helper being removed; kept in context while the agent confirmed each caller was migrated.</td></tr>
-<tr><td class="num">14k</td><td><div class="bar" style="width:15%"></div></td><td class="num">$0.17</td><td>Grep ×4</td><td class="prompt has-tip" data-tip-h="Grep target" data-full="useTokenHelper(">The call-site search for the old helper — four passes as the agent widened the pattern to catch every usage.</td></tr></tbody></table>
+  <tbody><tr><td class="num">118k</td><td><div class="bar" style="width:55%"></div></td><td class="num">$0.00</td><td>unexplained</td><td class="prompt">(peak context not attributed to any row — token-estimate error, tool-result wrappers, injected reminders)</td></tr>
+<tr><td class="num">31k</td><td><div class="bar" style="width:14%"></div></td><td class="num">$0.46</td><td>Read ×3</td><td class="prompt has-tip" data-tip-h="Read target" data-full="/repo/src/auth/token-service.ts">The new token-service module the refactor targets — re-read on every step because the implementation kept referring back to its full surface area.</td></tr>
+<tr><td class="num">22k</td><td><div class="bar" style="width:10%"></div></td><td class="num">$0.29</td><td>Bash ×4</td><td class="prompt has-tip" data-tip-h="Bash target" data-full="npm test -- auth">The auth test-suite run, repeated through the red/green loop — each full run&#39;s output stayed in context and was re-read by later steps.</td></tr>
+<tr><td class="num">19k</td><td><div class="bar" style="width:9%"></div></td><td class="num">$0.24</td><td>Read ×2</td><td class="prompt has-tip" data-tip-h="Read target" data-full="/repo/src/auth/legacy-token-helper.ts">The old in-process token helper being removed; kept in context while the agent confirmed each caller was migrated.</td></tr>
+<tr><td class="num">14k</td><td><div class="bar" style="width:7%"></div></td><td class="num">$0.17</td><td>Grep ×4</td><td class="prompt has-tip" data-tip-h="Grep target" data-full="useTokenHelper(">The call-site search for the old helper — four passes as the agent widened the pattern to catch every usage.</td></tr></tbody></table>
   <p class="note">estTokens ≈ chars/4 — estimates, not billed figures.</p>
 
   <h2 id="turns" class="tint-salmon">Top turns</h2>
@@ -539,10 +571,11 @@
       <p class="explain">Smaller side jobs the session handed off to helpers. Each helper works in
       its own short, separate conversation and sends back only a summary, so they usually cost just a
       few cents. If this list is short but the main session was expensive, the way to save money is to
-      hand off more of the exploring to helpers, not to cut back on the ones you already have.</p>
-      <table><thead><tr><th scope="col" data-sort="text">task</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
-      <tbody><tr><td class="prompt">Explore the auth module and map every caller of the old token helper</td><td class="num">$0.22</td></tr>
-<tr><td class="prompt">Draft the migration to the new token service in an isolated worktree</td><td class="num">$0.19</td></tr></tbody></table>
+      hand off more of the exploring to helpers, not to cut back on the ones you already have.
+      <em>Steps</em> is how many model turns a helper took — a rough measure of how much work it did.</p>
+      <table><thead><tr><th scope="col" data-sort="text">task</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
+      <tbody><tr><td class="prompt">Explore the auth module and map every caller of the old token helper</td><td class="num">7</td><td class="num">$0.22</td></tr>
+<tr><td class="prompt">Draft the migration to the new token service in an isolated worktree</td><td class="num">5</td><td class="num">$0.19</td></tr></tbody></table>
     </section>
   </div>
 
@@ -616,13 +649,20 @@
 
   wire('.ctx-chart', 'ctx-readout', 'ctx-bar',
     function (d) {
-      return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.ctx) + ' context</div>' +
+      var srcs = d.source ? d.source.split(' · ') : [];
+      var lines = '';
+      for (var i = 0; i < srcs.length; i++) lines += '<div class="tip-src">' + esc(srcs[i]) + '</div>';
+      return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.total) + ' context</div>' +
         '<div class="tip-cost">' + esc(d.cost) + '</div>' +
-        (d.prompt ? '<div class="tip-b">serving: ' + esc(d.prompt) + '</div>' : '');
+        '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · +' + esc(d.mins) + ' from start</div>' +
+        (d.tools ? '<div class="tip-b">ran: ' + esc(d.tools) + '</div>' : '') +
+        (srcs.length ? '<div class="tip-b">new in context (+' + esc(d.written) + '):' + lines + '</div>' : '');
     },
     function (d) {
-      return 'step ' + d.step + ' · ' + d.ctx + ' context · ' + d.cost +
-        (d.prompt ? ' · serving: ' + d.prompt : '');
+      return 'step ' + d.step + ' · ' + d.total + ' context (' + d.cached + ' re-read + ' + d.written +
+        ' written) · ' + d.cost + ' · +' + d.mins + ' from start' +
+        (d.tools ? ' · ran: ' + d.tools : '') +
+        (d.source ? ' · new in context: ' + d.source : '');
     });
 
   wire('.ctx-growbar', 'grow-readout', 'ctx-seg',
