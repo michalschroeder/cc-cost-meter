@@ -507,3 +507,22 @@ test('smoke: compactionWhatIf uses compact_boundary records for resets and postT
   assert.strictEqual(w.postTokensAssumed, 30000);
   assert.strictEqual(w.resetSource, 'compact_boundary');
 });
+
+// avoidable.cacheRebuilds is the cacheWrite spent re-caching an expired window
+// (context total holds, the re-read part collapses) — it must reach the grade anchor.
+test('smoke: avoidable counts cache rebuilds after an idle gap', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(150000, 4)),
+    step('m2', '2024-06-01T11:30:00Z', usage(0, 4, { cache_creation_input_tokens: 150000 })),
+  ];
+  writeTranscript(cfg, 'rebuild001', entries, 1717200000);
+  const out = await runJson(['rebuild001'], cfg);
+  const s = out.summary;
+  assert.strictEqual(s.cacheRebuilds.count, 1);
+  assert.ok(s.cacheRebuilds.extraCost > 0);
+  assert.strictEqual(s.avoidable.cacheRebuilds, s.cacheRebuilds.extraCost);
+  assert.ok(Math.abs(s.avoidable.total -
+    (s.avoidable.excessContext + s.avoidable.reducibleThinking + s.avoidable.cacheRebuilds)) < 1e-12);
+});

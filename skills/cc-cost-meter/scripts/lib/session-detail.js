@@ -105,13 +105,14 @@ function measureOutput(c) {
 }
 
 // Identity key for deduping content blocks merged across JSONL lines (see below):
-// type plus whichever of id (tool_use) / signature (thinking) / text / stringified
-// input distinguishes it. A block with none of those has no dedup key and is always
+// type plus whichever of id (tool_use) / signature (thinking) / thinking text (an
+// unsigned thinking block) / text / stringified input distinguishes it. A block with none of those has no dedup key and is always
 // kept (better to over-keep an indistinguishable block than drop a real one).
 function blockKey(b) {
   const type = b.type || '';
   if (b.id !== undefined) return `${type}|id:${b.id}`;
   if (b.signature !== undefined) return `${type}|sig:${b.signature}`;
+  if (typeof b.thinking === 'string') return `${type}|think:${b.thinking}`;
   if (b.text !== undefined) return `${type}|text:${b.text}`;
   if (b.input !== undefined) return `${type}|input:${JSON.stringify(b.input)}`;
   return null;
@@ -182,8 +183,11 @@ function parseCalls(file, trackPrompts, consumers, turnOffset) {
       rec.model = m.model;
     }
     // Claude Code writes one content block per JSONL line, all sharing this
-    // message.id (e.g. a thinking line then a tool_use line) — accumulate every
-    // line's blocks here, deduped by identity, in first-seen order.
+    // message.id (e.g. a thinking line then a tool_use line) — accumulate the blocks
+    // of every such line here, deduped by identity, in first-seen order. Only lines
+    // that carry usage+model get this far (the guard above), so a hypothetical
+    // content-only continuation line would be skipped and its blocks lost; today's
+    // transcripts repeat the full message envelope on every line.
     const blocksIn = typeof m.content === 'string' ? [{ type: 'text', text: m.content }]
       : (Array.isArray(m.content) ? m.content : []);
     for (const b of blocksIn) {
@@ -301,9 +305,12 @@ const THINKING_REDUCIBLE = 0.5;
 const BAND_THRESHOLDS = [0.05, 0.15, 0.30, 0.50];
 
 // The computed anchor for the 1–5 grade: how much of THIS bill a disciplined driver
-// would not have paid. Three non-overlapping slices — cache-read spend a compact-
-// when-large habit would have avoided, the reducible half of thinking output, and
-// cache re-writes bought by idling past the TTL. Graders start from `band` and must
+// would not have paid. Three slices — cache-read spend a compact-when-large habit
+// would have avoided, the reducible half of thinking output, and cache re-writes
+// bought by idling past the TTL. They are NOT fully disjoint: thinking tokens sit in
+// the window, so reducing thinking shrinks the same context compactionWhatIf.policy
+// claims savings on — doing both would save somewhat less than the sum. The sum is
+// the spec's formula and a deliberate upper bound. Graders start from `band` and must
 // justify any deviation.
 function buildAvoidable(summary, total) {
   const w = summary.compactionWhatIf;
@@ -319,7 +326,8 @@ function buildAvoidable(summary, total) {
   return {
     note: 'Computed anchor for the grade. excessContext = cache-read spend a compact-when-over-120k habit would have avoided (compactionWhatIf.policy); ' +
       'reducibleThinking = thinkingReducibleFraction of thinking output cost (/effort low); cacheRebuilds = cache re-writes after idle gaps. ' +
-      'share = total / session cost; band = rubric §6 bracket (bandThresholds are the upper bounds for 5,4,3,2). Estimates.',
+      'share = total / session cost; band = rubric §6 bracket (bandThresholds are the upper bounds for 5,4,3,2). Estimates. ' +
+      'The slices overlap slightly: thinking tokens are part of the context excessContext would have compacted away, so total is an upper bound, not a sum of independent savings.',
     excessContext, reducibleThinking, thinkingReducibleFraction: THINKING_REDUCIBLE, cacheRebuilds,
     total: sum, share, band, bandThresholds: BAND_THRESHOLDS.slice(),
   };
