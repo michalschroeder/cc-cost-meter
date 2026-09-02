@@ -10,6 +10,7 @@
 //   • Spending less next time  → an AI assessment of the whole session: a 1–5 `rating`, a
 //                               `headline`, and `cards` ({verdict good/bad/warn, title, what,
 //                               why, how}), stored at summary.aiAssessment for the renderer.
+//                               (`tips.anchorNote`, if present, is for the critic pass only — not rendered.)
 //
 // Pipeline:
 //   node scripts/analyze.js <prefix> > detail.json
