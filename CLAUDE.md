@@ -35,8 +35,10 @@ node scripts/render-report.js --mock --out /tmp/mock-report.html
 The skill is a three-stage pipeline; the JSON between stages is the contract:
 
 ```
-analyze.js  ──JSON──▶  (model writes summaries)  ──▶  apply-summaries.js  ──▶  render-report.js  ──▶  HTML
+analyze.js ──JSON──▶ grader-view.js ──▶ (model writes summaries) ──▶ apply-summaries.js ──▶ render-report.js ──▶ HTML
 ```
+
+`grader-view.js` trims the payload for the subagents; the renderer still consumes the full detail.
 
 1. **`scripts/analyze.js`** — self-contained JSON analyzer. Two modes: `list` (rank sessions,
    uses `cost-aggregate`) and detail (one session id-prefix, uses `session-detail.buildDetail`).
