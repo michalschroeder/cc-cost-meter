@@ -294,6 +294,54 @@ test('smoke: stepShape, modelSwitches, idleGaps are computed', async () => {
   assert.strictEqual(s.idleGaps.thresholdMs, 5 * 60 * 1000);
 });
 
+// Claude Code writes one content block per JSONL line, all lines sharing the same
+// assistant message.id — a step that thinks then calls tools is 2 lines. Both lines
+// here share id 'm1': line 1 carries the thinking block, line 2 carries 2 tool_use
+// blocks. Merged, this must read as ONE main step with thinking ground truth AND
+// both tool calls — not just the last line's block (the pre-fix keep-last bug).
+test('smoke: assistant content blocks split across lines with the same message id are merged', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50),
+      [{ type: 'thinking', thinking: '', signature: 'sig' }]),
+    step('m1', '2024-06-01T10:00:01Z', usage(1000, 600),
+      [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+       { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'pwd' } }]),
+    toolResult('t1', 'a', 'u2'), toolResult('t2', 'b', 'u3'),
+  ];
+  writeTranscript(cfg, 'split001', entries, 1717200000);
+  const out = await runJson(['split001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'thinking-blocks');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.mainSteps, 1);
+  assert.deepStrictEqual(out.summary.stepShape,
+    { toolCalls: 2, stepsWithTools: 1, parallelSteps: 1, toolsPerStep: 2 });
+});
+
+// Idempotence: some Claude Code versions may write the WHOLE content array on every
+// line instead of splitting it. Two identical lines (same id, same blocks) must not
+// double-count — dedupe on block identity, not just merge blindly.
+test('smoke: repeated identical assistant lines for one message id do not inflate counts', async () => {
+  const cfg = mkProfile();
+  const content = [{ type: 'thinking', thinking: '', signature: 'sig' },
+    { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }];
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50), content),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50), content),
+    toolResult('t1', 'a', 'u2'),
+  ];
+  writeTranscript(cfg, 'dup001', entries, 1717200000);
+  const out = await runJson(['dup001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.mainSteps, 1);
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.deepStrictEqual(out.summary.stepShape,
+    { toolCalls: 1, stepsWithTools: 1, parallelSteps: 0, toolsPerStep: 1 });
+});
+
 // Peak context the consumer rows cannot account for is shown as one honest row
 // instead of silently making the table look complete.
 test('smoke: consumers expose an unexplained row when peak > attributed', async () => {

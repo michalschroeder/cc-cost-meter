@@ -78,7 +78,8 @@ function resultChars(content) {
 // Char sizes of what the model itself emitted in one assistant message, by kind:
 // prose text, extended-thinking blocks, and the tool_use arguments it wrote (Edit
 // payloads, Bash commands, subagent prompts). Used to apportion the call's exact
-// output_tokens across those kinds. Keep LAST per message id, like usage/tools.
+// output_tokens across those kinds. Operates on the MERGED block list for a message
+// id (see parseCalls) — one measurement over all its blocks, not per JSONL line.
 function measureOutput(c) {
   const p = { text: 0, thinking: 0, toolInput: {}, thinkingBlocks: 0 };
   if (typeof c === 'string') { p.text = c.length; return p; }
@@ -103,16 +104,33 @@ function measureOutput(c) {
   return p;
 }
 
+// Identity key for deduping content blocks merged across JSONL lines (see below):
+// type plus whichever of id (tool_use) / signature (thinking) / text / stringified
+// input distinguishes it. A block with none of those has no dedup key and is always
+// kept (better to over-keep an indistinguishable block than drop a real one).
+function blockKey(b) {
+  const type = b.type || '';
+  if (b.id !== undefined) return `${type}|id:${b.id}`;
+  if (b.signature !== undefined) return `${type}|sig:${b.signature}`;
+  if (b.text !== undefined) return `${type}|text:${b.text}`;
+  if (b.input !== undefined) return `${type}|input:${JSON.stringify(b.input)}`;
+  return null;
+}
+
 // Parse a transcript into ordered, within-file-deduped calls:
-// { id, ts, usage, model, prompt, turn, tools }. within-file: keep LAST usage/tools
-// per message.id, carry FIRST timestamp + FIRST active prompt. id-less calls always
-// kept. When `trackPrompts`, each call is tagged with the active user prompt and a
-// monotonic `turn` index that increments on EVERY user submission — so two turns
-// with identical prompt text stay distinct (turn 0 = pre-prompt session start).
-// When `consumers` (array) is given, every tool_result and user prompt is pushed
-// onto it as { tool, target, estTokens, afterStep } — what landed in this
-// transcript's context, attributed to the concrete file/command/pattern it came
-// from, sized at ~4 chars/token, tagged with how many billed calls preceded it.
+// { id, ts, usage, model, prompt, turn, tools, outParts }. within-file: keep LAST
+// usage/model per message.id, carry FIRST timestamp + FIRST active prompt. Content
+// blocks (thinking/text/tool_use) are MERGED across every line sharing a message.id
+// (Claude Code writes one content block per JSONL line, not one line per message —
+// see the merge below), then `tools`/`outParts` are derived once from that merged
+// list. id-less calls always kept. When `trackPrompts`, each call is tagged with the
+// active user prompt and a monotonic `turn` index that increments on EVERY user
+// submission — so two turns with identical prompt text stay distinct (turn 0 =
+// pre-prompt session start). When `consumers` (array) is given, every tool_result
+// and user prompt is pushed onto it as { tool, target, estTokens, afterStep } — what
+// landed in this transcript's context, attributed to the concrete file/command/
+// pattern it came from, sized at ~4 chars/token, tagged with how many billed calls
+// preceded it.
 function parseCalls(file, trackPrompts, consumers) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
@@ -151,19 +169,39 @@ function parseCalls(file, trackPrompts, consumers) {
     const realId = typeof m.id === 'string' && m.id ? m.id : null;
     const key = realId || `__synth__${synth++}`;
     if (!byKey.has(key)) order.push(key);
-    const prev = byKey.get(key);
-    byKey.set(key, {
-      id: realId,
-      ts: prev ? prev.ts : o.timestamp,
-      usage: m.usage,
-      model: m.model,
-      prompt: prev ? prev.prompt : current,
-      turn: prev ? prev.turn : turn,
-      tools: toolNames(m),
-      outParts: measureOutput(m.content),
-    });
+    let rec = byKey.get(key);
+    if (!rec) {
+      rec = { id: realId, ts: o.timestamp, usage: m.usage, model: m.model,
+        prompt: current, turn, blocks: [], blockKeys: new Set() };
+      byKey.set(key, rec);
+    } else {
+      rec.usage = m.usage; // keep LAST usage/model per message.id
+      rec.model = m.model;
+    }
+    // Claude Code writes one content block per JSONL line, all sharing this
+    // message.id (e.g. a thinking line then a tool_use line) — accumulate every
+    // line's blocks here, deduped by identity, in first-seen order.
+    const blocksIn = typeof m.content === 'string' ? [{ type: 'text', text: m.content }]
+      : (Array.isArray(m.content) ? m.content : []);
+    for (const b of blocksIn) {
+      if (!b) continue;
+      const k = blockKey(b);
+      if (k !== null) {
+        if (rec.blockKeys.has(k)) continue;
+        rec.blockKeys.add(k);
+      }
+      rec.blocks.push(b);
+    }
   }
-  return order.map((k) => byKey.get(k));
+  return order.map((k) => {
+    const rec = byKey.get(k);
+    return {
+      id: rec.id, ts: rec.ts, usage: rec.usage, model: rec.model,
+      prompt: rec.prompt, turn: rec.turn,
+      tools: toolNames({ content: rec.blocks }),
+      outParts: measureOutput(rec.blocks),
+    };
+  });
 }
 
 // Coarse class of a main-session turn, for attributing cost to *kinds* of work.
