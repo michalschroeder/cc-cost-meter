@@ -293,3 +293,24 @@ test('smoke: stepShape, modelSwitches, idleGaps are computed', async () => {
   assert.strictEqual(s.idleGaps.totalMs, 20 * 60 * 1000);
   assert.strictEqual(s.idleGaps.thresholdMs, 5 * 60 * 1000);
 });
+
+// Peak context the consumer rows cannot account for is shown as one honest row
+// instead of silently making the table look complete.
+test('smoke: consumers expose an unexplained row when peak > attributed', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(0, 4, { cache_creation_input_tokens: 50000 })),
+    step('m2', '2024-06-01T10:00:05Z', usage(90000, 4)),
+  ];
+  writeTranscript(cfg, 'unexp001', entries, 1717200000);
+  const out = await runJson(['unexp001'], cfg);
+  const cc = out.summary.contextConsumers;
+  assert.strictEqual(cc.peakContext, 90000);
+  assert.ok(cc.attributedTokens < 90000);
+  assert.strictEqual(cc.unexplainedTokens, 90000 - cc.attributedTokens);
+  assert.strictEqual(cc.totalEstTokens, 90000);
+  const row = cc.top.find((c) => c.tool === 'unexplained');
+  assert.ok(row && row.synthetic && row.carriedCost === 0);
+  assert.strictEqual(row.estTokens, cc.unexplainedTokens);
+});

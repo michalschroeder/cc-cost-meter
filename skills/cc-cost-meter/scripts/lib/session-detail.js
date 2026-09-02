@@ -369,7 +369,8 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   // residual is attributed per-step (exact) or everywhere (legacy upper bound).
   const thinkingTracked = mainCalls.some((c) => c.outParts && c.outParts.thinkingBlocks > 0);
   summary.contextConsumers = buildConsumers(
-    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate, thinkingTracked));
+    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate, thinkingTracked),
+    summary.contextGrowth.peakContext);
   // What landed in context right before each main call — the likely trigger of
   // that call's reasoning. Keyed by parse-order index; biggest event wins when a
   // batch of tool_results returns at once.
@@ -579,7 +580,7 @@ function syntheticConsumers(mainCalls, rate, tracked) {
 // the session's blended cache-read rate — what re-reading that content on every
 // later step cost. Estimates (usage data has no per-item attribution); the
 // `note` states that so downstream consumers don't present them as exact.
-function buildConsumers(events, totalSteps, cacheReadRate, extras) {
+function buildConsumers(events, totalSteps, cacheReadRate, extras, peakContext) {
   const byKey = new Map();
   const byTool = new Map();
   let totalEstTokens = 0;
@@ -599,11 +600,22 @@ function buildConsumers(events, totalSteps, cacheReadRate, extras) {
       e.estTokens * Math.max(0, totalSteps - e.afterStep) * cacheReadRate);
   }
   for (const x of extras || []) fold(x.tool, x.target, x.count, x.estTokens, x.carriedCost, x.synthetic);
+  // Whatever the rows can't account for at the peak — tokenizer density (chars/4 is
+  // an estimate), tool-result wrappers, hook-injected system reminders. Sessions
+  // with resets can attribute MORE than the peak (rows sum the whole session), in
+  // which case there is nothing unexplained.
+  const attributed = totalEstTokens;
+  const unexplained = Math.max(0, Math.round((peakContext || 0) - attributed));
+  if (unexplained > 0) fold('unexplained', '(peak context not attributed to any row — token-estimate error, tool-result wrappers, injected reminders)', 1, unexplained, 0, true);
   const desc = (a, b) => b.estTokens - a.estTokens;
   return {
     note: 'estTokens ≈ chars/4 of what landed in main-session context (tool results + user prompts; ' +
       'session-overhead covers the baseline; assistant-text / assistant-thinking / assistant-tool-calls split the model\'s own output by kind, apportioned from exact output_tokens); ' +
-      'carriedCost ≈ estTokens × steps-remaining × blended cache-read rate — what re-reading it on every later step cost. Estimates, not billed figures.',
+      'carriedCost ≈ estTokens × steps-remaining × blended cache-read rate — what re-reading it on every later step cost. Estimates, not billed figures. ' +
+      'unexplained = peak context minus everything attributed — an honesty row, not a consumer.',
+    peakContext: peakContext || 0,
+    attributedTokens: attributed,
+    unexplainedTokens: unexplained,
     totalEstTokens,
     byTool: [...byTool.values()].sort(desc),
     top: [...byKey.values()].sort(desc).slice(0, 30),
