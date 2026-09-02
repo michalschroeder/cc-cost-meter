@@ -126,12 +126,15 @@ function blockKey(b) {
 // list. id-less calls always kept. When `trackPrompts`, each call is tagged with the
 // active user prompt and a monotonic `turn` index that increments on EVERY user
 // submission — so two turns with identical prompt text stay distinct (turn 0 =
-// pre-prompt session start). When `consumers` (array) is given, every tool_result
+// pre-prompt session start). `turnOffset` seeds that counter so a resumed session's
+// later transcript half continues the earlier half's numbering instead of colliding
+// with it (see buildDetail); the returned array carries `lastTurn`, the final counter
+// value, as the next half's offset. When `consumers` (array) is given, every tool_result
 // and user prompt is pushed onto it as { tool, target, estTokens, afterStep } — what
 // landed in this transcript's context, attributed to the concrete file/command/
 // pattern it came from, sized at ~4 chars/token, tagged with how many billed calls
 // preceded it.
-function parseCalls(file, trackPrompts, consumers) {
+function parseCalls(file, trackPrompts, consumers, turnOffset) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
   const byKey = new Map();
@@ -139,7 +142,7 @@ function parseCalls(file, trackPrompts, consumers) {
   const pendingTools = new Map(); // tool_use id → { tool, target }
   let synth = 0;
   let current = '(session start)';
-  let turn = 0;
+  let turn = turnOffset || 0;
   for (const line of raw.split('\n')) {
     if (!line) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
@@ -193,7 +196,7 @@ function parseCalls(file, trackPrompts, consumers) {
       rec.blocks.push(b);
     }
   }
-  return order.map((k) => {
+  const out = order.map((k) => {
     const rec = byKey.get(k);
     return {
       id: rec.id, ts: rec.ts, usage: rec.usage, model: rec.model,
@@ -202,6 +205,8 @@ function parseCalls(file, trackPrompts, consumers) {
       outParts: measureOutput(rec.blocks),
     };
   });
+  out.lastTurn = turn; // highest turn index reached in this file (see turnOffset)
+  return out;
 }
 
 // Coarse class of a main-session turn, for attributing cost to *kinds* of work.
@@ -349,10 +354,22 @@ function buildDetail(mainFile, subagentFiles, pricing) {
 
   const mainIdx = []; // per kept main call: its index in the main file's parse order
   const compactions = []; // authoritative /compact boundary records from the main transcript(s)
+  // Turn indices must be monotonic across the main halves of a resumed (cross-cwd)
+  // session, or two unrelated turns from different halves collide on one index (they
+  // merge into one `turns` row, and the turn-bounded thinking carry reaches across
+  // halves). Each half continues the previous one's numbering: its turn 0 — "before
+  // any user prompt in THIS file" — is the continuation of the previous half's last
+  // turn, so it maps onto that turn's index. A single-file session offsets by 0 and
+  // numbers exactly as before.
+  let mainTurnOffset = 0;
   for (const d of descriptors) {
     if (d.isMain) compactions.push(...parseCompactions(d.file));
-    const parsed = parseCalls(d.file, d.isMain, d.isMain ? consumerEvents : null);
-    if (d.isMain) mainParsedSteps += parsed.length; // accumulate across multiple main halves (cross-cwd resume)
+    const parsed = parseCalls(d.file, d.isMain, d.isMain ? consumerEvents : null,
+      d.isMain ? mainTurnOffset : 0);
+    if (d.isMain) {
+      mainParsedSteps += parsed.length; // accumulate across multiple main halves (cross-cwd resume)
+      mainTurnOffset = parsed.lastTurn;
+    }
     for (let fi = 0; fi < parsed.length; fi++) {
       const call = parsed[fi];
       if (!dayKey(call.ts)) continue; // parity: cost-aggregate drops undated calls, so the detail total matches list COST

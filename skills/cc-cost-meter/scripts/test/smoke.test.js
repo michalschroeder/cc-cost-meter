@@ -418,3 +418,92 @@ test('smoke: compactionWhatIf best is null when no boundary saves money', async 
   assert.strictEqual(out.summary.compactionWhatIf.policy.compactions, 0);
   assert.ok(out.summary.avoidable.band >= 4);
 });
+
+// --- resumed (cross-cwd) sessions: buildDetail folds several main halves ---------
+// analyze.js only ever passes ONE main file, so the array form is exercised directly.
+const { buildDetail } = require('../lib/session-detail');
+const { loadPricing } = require('../lib/pricing');
+
+function writeRawTranscript(dir, name, entries, when) {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, entries.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  if (when != null) { const d = new Date(when * 1000); fs.utimesSync(file, d, d); }
+  return file;
+}
+const bundledPricing = () => loadPricing(mkProfile(), { allowFetch: false });
+
+// A session resumed under a different cwd has one transcript half per project dir.
+// Turn indices must keep climbing across halves: the second half's pre-prompt calls
+// continue the first half's LAST turn, and its first prompt opens a NEW turn — never
+// turn 0/1 again (which would merge two unrelated turns into one row).
+test('smoke: resumed session numbers turns monotonically across main halves', () => {
+  const cfg = mkProfile();
+  const a = writeRawTranscript(cfg, 'half-a.jsonl', [
+    user('first prompt', 'u1'),
+    step('ma1', '2024-06-01T10:00:00Z', usage(1000, 10)),
+    user('second prompt', 'u2'),
+    step('ma2', '2024-06-01T10:01:00Z', usage(1100, 10)),
+  ], 1717200000);
+  const b = writeRawTranscript(cfg, 'half-b.jsonl', [
+    step('mb0', '2024-06-01T10:02:00Z', usage(1200, 10)), // continuation of turn 2
+    user('third prompt', 'u3'),
+    step('mb1', '2024-06-01T10:03:00Z', usage(1300, 10)),
+  ], 1717200100);
+  const d = buildDetail([a, b], [], bundledPricing());
+  assert.deepStrictEqual(d.turns.map((t) => t.turnIndex), [1, 2, 3]);
+  assert.deepStrictEqual(d.turns.map((t) => t.prompt),
+    ['first prompt', 'second prompt', 'third prompt']);
+  assert.deepStrictEqual(d.turns.map((t) => t.steps), [1, 2, 1]);
+  assert.deepStrictEqual(d.perCall.map((c) => c.turnIndex), [1, 2, 2, 3]);
+});
+
+// The counterfactual must not claim savings the session already banked: a real
+// /compact mid-session shrinks the window itself, so a simulated compaction before
+// it cannot keep "removing" tokens that are already gone.
+test('smoke: compactionWhatIf claims nothing after a real reset (drop heuristic)', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(60000, 4)),  // real /compact happened here
+    step('m4', '2024-06-01T10:00:15Z', usage(80000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(100000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif003', entries, 1717200000);
+  const out = await runJson(['whatif003'], cfg);
+  const w = out.summary.compactionWhatIf;
+  assert.strictEqual(w.best, null);
+  assert.strictEqual(w.policy.estSaving, 0);
+  assert.strictEqual(w.resetSource, 'token-drop-heuristic');
+  assert.strictEqual(out.summary.avoidable.excessContext, 0);
+});
+
+// With compact_boundary records the simulator uses them (authoritative, like
+// buildSummary) instead of the drop heuristic — a real compaction too small for the
+// 100k drop threshold still ends a simulated compaction's effect, and the records'
+// median postTokens replaces the 15000 default.
+test('smoke: compactionWhatIf uses compact_boundary records for resets and postTokens', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    { type: 'system', subtype: 'compact_boundary', timestamp: '2024-06-01T10:00:07Z',
+      compactMetadata: { trigger: 'manual', preTokens: 150000, postTokens: 30000 } },
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(130000, 4)),
+    step('m4', '2024-06-01T10:00:15Z', usage(140000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(160000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif004', entries, 1717200000);
+  const out = await runJson(['whatif004'], cfg);
+  const w = out.summary.compactionWhatIf;
+  assert.strictEqual(w.best, null);
+  assert.strictEqual(w.policy.estSaving, 0);
+  assert.strictEqual(w.postTokensAssumed, 30000);
+  assert.strictEqual(w.resetSource, 'compact_boundary');
+});
