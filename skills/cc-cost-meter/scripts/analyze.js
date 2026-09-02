@@ -84,7 +84,8 @@ function analysisPayload(detail, id, ts, title, recap) {
       'thinking.byTurn (which prompts drove the reasoning) and thinking.topSteps (the heaviest single bursts, each with its trigger — what landed in context right before — and the action it took next; ' +
       'the thinking text itself is never persisted, so trigger → next-action is the maximum attribution) — use it to explain WHY assistant-thinking is large. ' +
       'summary.bySkill attributes cost to skill dispatches (turns whose prompt is a skill expansion or /slash command) — only the turns the skill itself drove, not later work it influenced. ' +
-      'unpriced = billed calls EXCLUDED from totalCost/components/byModel because their model (unpricedModels) is missing from the price table — totalCost is undercounted by their unknown amount.',
+      'unpriced = billed calls EXCLUDED from totalCost/components/byModel because their model (unpricedModels) is missing from the price table — totalCost is undercounted by their unknown amount. ' +
+      'summary.avoidable is the computed anchor for the 1–5 grade (band) — start there; summary.compactionWhatIf names WHERE a /compact would have paid off. ',
     components: detail.components,
     summary: detail.summary,
     byModel: detail.byModel,

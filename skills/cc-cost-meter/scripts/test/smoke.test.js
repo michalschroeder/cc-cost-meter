@@ -344,6 +344,16 @@ test('smoke: compactionWhatIf finds the best boundary and a policy saving', asyn
   assert.deepStrictEqual(w.policy.atTurns, [1]);
   assert.strictEqual(w.policy.compactions, 1);
   assert.ok(Math.abs(w.policy.estSaving - 255000 * r) < 1e-9);
+
+  const av = out.summary.avoidable;
+  assert.ok(Math.abs(av.excessContext - w.policy.estSaving) < 1e-12);
+  assert.ok(Math.abs(av.reducibleThinking - out.summary.assistantOutput.byKind.thinking.cost * 0.5) < 1e-12);
+  assert.strictEqual(av.cacheRebuilds, 0);
+  assert.ok(Math.abs(av.total - (av.excessContext + av.reducibleThinking + av.cacheRebuilds)) < 1e-12);
+  assert.ok(Math.abs(av.share - av.total / out.totalCost) < 1e-12);
+  // 255000×3e-7 = $0.0765 avoidable of ≈ $0.2013 total (670k×3e-7 + 20 out tok) → ~38% → band 2
+  assert.strictEqual(av.band, 2);
+  assert.deepStrictEqual(av.bandThresholds, [0.05, 0.15, 0.30, 0.50]);
 });
 
 test('smoke: compactionWhatIf best is null when no boundary saves money', async () => {
@@ -358,4 +368,5 @@ test('smoke: compactionWhatIf best is null when no boundary saves money', async 
   const out = await runJson(['whatif002'], cfg);
   assert.strictEqual(out.summary.compactionWhatIf.best, null);
   assert.strictEqual(out.summary.compactionWhatIf.policy.compactions, 0);
+  assert.ok(out.summary.avoidable.band >= 4);
 });

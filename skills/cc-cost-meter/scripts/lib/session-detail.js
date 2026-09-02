@@ -252,6 +252,36 @@ function firstPromptLabel(file) {
 // `mainFile` accepts a single path or an array — a session resumed under a
 // different cwd has a transcript half under each `projects/<enc-cwd>/` dir, and
 // all halves must be folded in to match the list COST (aggregate sums them all).
+// Rubric §2 "Thinking control": /effort low is a ~50–70% reduction, not elimination.
+const THINKING_REDUCIBLE = 0.5;
+// Rubric §6 bands on the avoidable share of the bill: <5% → 5, <15% → 4, <30% → 3, <50% → 2, else 1.
+const BAND_THRESHOLDS = [0.05, 0.15, 0.30, 0.50];
+
+// The computed anchor for the 1–5 grade: how much of THIS bill a disciplined driver
+// would not have paid. Three non-overlapping slices — cache-read spend a compact-
+// when-large habit would have avoided, the reducible half of thinking output, and
+// cache re-writes bought by idling past the TTL. Graders start from `band` and must
+// justify any deviation.
+function buildAvoidable(summary, total) {
+  const w = summary.compactionWhatIf;
+  const ao = summary.assistantOutput;
+  const excessContext = w && w.policy ? w.policy.estSaving : 0;
+  const thinkingCost = ao && ao.byKind ? ao.byKind.thinking.cost : 0;
+  const reducibleThinking = thinkingCost * THINKING_REDUCIBLE;
+  const cacheRebuilds = (summary.cacheRebuilds && summary.cacheRebuilds.extraCost) || 0;
+  const sum = excessContext + reducibleThinking + cacheRebuilds;
+  const share = total > 0 ? sum / total : 0;
+  let band = 1;
+  for (let i = 0; i < BAND_THRESHOLDS.length; i++) if (share < BAND_THRESHOLDS[i]) { band = 5 - i; break; }
+  return {
+    note: 'Computed anchor for the grade. excessContext = cache-read spend a compact-when-over-120k habit would have avoided (compactionWhatIf.policy); ' +
+      'reducibleThinking = thinkingReducibleFraction of thinking output cost (/effort low); cacheRebuilds = cache re-writes after idle gaps. ' +
+      'share = total / session cost; band = rubric §6 bracket (bandThresholds are the upper bounds for 5,4,3,2). Estimates.',
+    excessContext, reducibleThinking, thinkingReducibleFraction: THINKING_REDUCIBLE, cacheRebuilds,
+    total: sum, share, band, bandThresholds: BAND_THRESHOLDS.slice(),
+  };
+}
+
 function buildDetail(mainFile, subagentFiles, pricing) {
   const descriptors = [];
   const add = (file, name, isMain, label) => {
@@ -415,6 +445,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   }
   summary.bySkill = [...bySkill.values()].sort((a, b) => b.cost - a.cost);
   summary.compactionWhatIf = buildCompactionWhatIf(mainCalls, compactions);
+  summary.avoidable = buildAvoidable(summary, total);
   return {
     total, calls, components,
     unpriced, unpricedModels: [...unpricedModels],

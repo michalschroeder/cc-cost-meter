@@ -62,5 +62,6 @@
 - `summary.stepShape` / `modelSwitches` / `idleGaps` — batching (parallelSteps = steps that issued
   >1 tool call), model changes between steps (each re-writes the cache), and pauses >5 min (phase
   boundaries where a /compact was cheap).
+- `summary.avoidable` — { excessContext, reducibleThinking, cacheRebuilds, total, share, band }: the computed grade anchor. The grader starts at band and must justify any deviation.
 - `byModel` / `byAgent` / `subagents` — cost split by model, by subagent task, and the subagent total.
 - `turns` (execution order) carry `kind` / `avgContext` / `peakContext`.
