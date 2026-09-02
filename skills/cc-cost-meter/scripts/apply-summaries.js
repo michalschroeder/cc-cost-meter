@@ -17,11 +17,13 @@
 //   node scripts/apply-summaries.js --summaries summaries.json < detail.json \
 //     | node scripts/render-report.js --out ./session-cost-<id>.html
 //
-// summaries.json shapes (turn/consumer keys are integers, values short phrases):
-//   namespaced : { "turns": { "<turnIndex>": "…" }, "consumers": { "<index>": "…" },
+// summaries.json shapes (turn/consumer keys are integers, values short phrases or objects):
+//   namespaced : { "turns": { "<turnIndex>": "…" | { "summary": "…", "kind": "approval|new-task|follow-up|correction" } },
+//                  "consumers": { "<index>": "…" },
 //                  "tips": { "rating": 3, "headline": "…",
 //                            "cards": [ { "verdict": "bad", "title": "…", "what": "…",
-//                                        "why": "…", "how": "…" }, … ] } }
+//                                        "why": "…", "how": "…" }, … ] }
+//                         | { "skipped": "reason…" } }
 //   flat        : { "<turnIndex>": "…" }  (or [{turnIndex,summary}])  → applied to turns only
 //   (A legacy `tips` LIST of { head, body } / strings is still accepted → what-only cards.)
 //
@@ -54,16 +56,21 @@ function readStdin() {
   });
 }
 
-// Normalize either shape — { "<turnIndex>": "text" } or [{turnIndex, summary}] — into a
-// Map<number, string> of trimmed non-empty summaries.
+// Turn-tag vocabulary the Haiku turn batch may emit (see references/turns-prompt.md).
+const TURN_KINDS = new Set(['new-task', 'follow-up', 'correction', 'approval']);
+const normTag = (v) => { const s = clean(v).toLowerCase(); return TURN_KINDS.has(s) ? s : null; };
+
+// Normalize any accepted shape into Map<number, { summary, tag }>:
+//   { "<idx>": "text" } | { "<idx>": { summary, kind } } | [{ turnIndex, summary, kind }]
 function toMap(parsed) {
   const m = new Map();
   const put = (k, v) => {
     const idx = Number(k);
-    const s = clean(v);
-    if (Number.isFinite(idx) && s) m.set(idx, s);
+    const val = (v && typeof v === 'object') ? v : { summary: v };
+    const s = clean(val.summary);
+    if (Number.isFinite(idx) && s) m.set(idx, { summary: s, tag: normTag(val.kind != null ? val.kind : val.tag) });
   };
-  if (Array.isArray(parsed)) for (const r of parsed) { if (r) put(r.turnIndex, r.summary); }
+  if (Array.isArray(parsed)) for (const r of parsed) { if (r) put(r.turnIndex, r); }
   else if (parsed && typeof parsed === 'object') for (const k of Object.keys(parsed)) put(k, parsed[k]);
   return m;
 }
@@ -91,6 +98,11 @@ function toAssessment(parsed) {
   if (Array.isArray(parsed)) {
     rawCards = parsed;
   } else if (parsed && typeof parsed === 'object') {
+    // The skill skips the grading subagents on cheap sessions / --no-assess; the
+    // report still says so instead of rendering an empty section.
+    if (typeof parsed.skipped === 'string' && clean(parsed.skipped)) {
+      return { rating: null, headline: `Assessment skipped: ${clean(parsed.skipped).slice(0, 140)}`, cards: [], skipped: true };
+    }
     rating = toRating(parsed.rating);
     headline = clean(parsed.headline || parsed.summary || '').slice(0, 160);
     rawCards = Array.isArray(parsed.cards) ? parsed.cards : [];
@@ -145,14 +157,17 @@ async function main() {
   let applied = 0;
   if (maps.turns.size && Array.isArray(payload.turns)) {
     for (const t of payload.turns) {
-      if (t && maps.turns.has(t.turnIndex)) { t.summary = maps.turns.get(t.turnIndex); applied++; }
+      if (t && maps.turns.has(t.turnIndex)) {
+        const v = maps.turns.get(t.turnIndex);
+        t.summary = v.summary; if (v.tag) t.userKind = v.tag; applied++;
+      }
     }
   }
   let appliedCc = 0;
   const top = payload.summary && payload.summary.contextConsumers && payload.summary.contextConsumers.top;
   if (maps.consumers.size && Array.isArray(top)) {
     top.forEach((c, i) => {
-      if (c && maps.consumers.has(i)) { c.summary = maps.consumers.get(i); appliedCc++; }
+      if (c && maps.consumers.has(i)) { c.summary = maps.consumers.get(i).summary; appliedCc++; }
     });
   }
   let appliedCards = 0;
