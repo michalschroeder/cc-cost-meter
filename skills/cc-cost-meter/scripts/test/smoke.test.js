@@ -244,3 +244,28 @@ test('smoke: no thinking blocks anywhere → legacy residual heuristic, flagged'
   assert.strictEqual(th.stepsWithThinking, 1);
   assert.strictEqual(th.unstoredTokens, 596);
 });
+
+// Thinking from turn 1 is not re-read in turn 2 (prior-turn thinking blocks are
+// stripped from context), so its carried cost counts only the remaining steps of
+// its own turn: m1's thinking is carried by m2 only, not by m3/m4.
+test('smoke: assistant-thinking carry is bounded to the turn', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('first', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'thinking', thinking: '', signature: 's' },
+       { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(1100, 4)),
+    user('second', 'u3'),
+    step('m3', '2024-06-01T10:01:00Z', usage(1200, 4)),
+    step('m4', '2024-06-01T10:01:05Z', usage(1300, 4)),
+  ];
+  writeTranscript(cfg, 'carry001', entries, 1717200000);
+  const out = await runJson(['carry001'], cfg);
+  const main = out.calls.filter((c) => c.isMain);
+  const rate = main.reduce((a, c) => a + c.cacheReadCost, 0) / main.reduce((a, c) => a + c.tokens.cacheRead, 0);
+  const row = out.summary.contextConsumers.top.find((c) => c.tool === 'assistant-thinking');
+  assert.strictEqual(row.estTokens, 596);
+  assert.ok(Math.abs(row.carriedCost - 596 * 1 * rate) < 1e-9, `carried ${row.carriedCost} vs ${596 * rate}`);
+});

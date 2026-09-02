@@ -33,7 +33,9 @@
   with `estTokens` (~chars/4) and `carriedCost` (the re-read tax on every later step). Includes
   synthetic rows so the table explains ~all of peak context: `session-overhead` (system prompt +
   tool defs) and the model's own output split by kind — `assistant-text` (prose replies),
-  `assistant-thinking` (extended-thinking blocks), `assistant-tool-calls` (arguments it wrote:
+  `assistant-thinking` (extended-thinking blocks) — its carried cost counts only the remaining
+  steps of its own turn, because prior-turn thinking is stripped from context at the next user
+  message, `assistant-tool-calls` (arguments it wrote:
   Edit payloads, Bash commands, subagent prompts; the label names the top tools). When
   assistant-* rows dominate, the session's cost driver is the model's own verbosity (long
   thinking, big Edit payloads), not what it read. Use `top` to name the exact files/commands

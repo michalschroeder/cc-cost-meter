@@ -534,13 +534,19 @@ function syntheticConsumers(mainCalls, rate, tracked) {
   const acc = { text: { tok: 0, carried: 0 }, thinking: { tok: 0, carried: 0 } };
   const perTool = new Map(); // tool name → { tok, count }
   let toolTok = 0, toolCarried = 0, toolCount = 0, thinkingCalls = 0;
+  // Last main-step index per turn: prior-turn thinking blocks are stripped from the
+  // API context at the next user turn (kept only inside a turn's tool loop), so
+  // thinking is carried by the remaining steps of ITS turn, not the whole session.
+  const lastOfTurn = new Map();
+  mainCalls.forEach((c, i) => lastOfTurn.set(c.turnIndex, i));
   mainCalls.forEach((c, i) => {
     if (!c.tokens.output) return;
     const f = (n - 1 - i) * rate; // carried $/token for output landing at step i
     const a = apportionOutput(c, tracked);
     acc.text.tok += a.text; acc.text.carried += a.text * f;
     const think = a.storedThinking + a.unstoredThinking;
-    acc.thinking.tok += think; acc.thinking.carried += think * f;
+    const fThink = (lastOfTurn.get(c.turnIndex) - i) * rate;
+    acc.thinking.tok += think; acc.thinking.carried += think * fThink;
     if (a.thought && (think > 0 || tracked)) thinkingCalls += 1;
     for (const [name, t] of Object.entries(a.perTool)) {
       toolTok += t.tok; toolCarried += t.tok * f; toolCount += t.count;
@@ -558,7 +564,7 @@ function syntheticConsumers(mainCalls, rate, tracked) {
       count: 1, estTokens: baseline, carriedCost: baseline * (n - 1) * rate },
     { tool: 'assistant-text', target: `(the model's prose replies across ${n} steps)`,
       count: n, estTokens: Math.round(acc.text.tok), carriedCost: acc.text.carried },
-    { tool: 'assistant-thinking', target: '(reasoning before answers/tool calls — incl. thinking not stored in the transcript)',
+    { tool: 'assistant-thinking', target: '(reasoning before answers/tool calls — incl. thinking not stored in the transcript; re-read only within its own turn)',
       count: thinkingCalls, estTokens: Math.round(acc.thinking.tok), carriedCost: acc.thinking.carried },
     { tool: 'assistant-tool-calls', target: `(arguments the model wrote into tool calls${toolList ? ' — ' + toolList : ''})`,
       count: toolCount, estTokens: Math.round(toolTok), carriedCost: toolCarried },
