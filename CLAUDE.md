@@ -46,7 +46,9 @@ analyze.js ──JSON──▶ grader-view.js ──▶ (model writes summaries)
    calls.
 2. **The model** (the skill's `SKILL.md` workflow, run by Claude) dispatches subagents to write
    human copy — turn summaries, context-consumer labels, and the 1–5 "Spending less next time"
-   assessment — and merges them into one `summaries.json`.
+   assessment — using bundled prompts (`references/{turns,consumers,grader,critic}-prompt.md`),
+   then merges into `summaries.json`. Grading subagents are skipped when `--no-assess` is passed
+   or session cost is under $0.50.
 3. **`scripts/apply-summaries.js`** merges that JSON back into the detail payload (turns by
    `turnIndex`, consumers by index, tips → `aiAssessment`), piped into **`scripts/render-report.js`**
    which produces the standalone HTML from `assets/report-template.html`.
