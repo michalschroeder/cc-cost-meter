@@ -269,3 +269,27 @@ test('smoke: assistant-thinking carry is bounded to the turn', async () => {
   assert.strictEqual(row.estTokens, 596);
   assert.ok(Math.abs(row.carriedCost - 596 * 1 * rate) < 1e-9, `carried ${row.carriedCost} vs ${596 * rate}`);
 });
+
+test('smoke: stepShape, modelSwitches, idleGaps are computed', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 50),
+      [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/a' } },
+       { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/b' } }]),
+    toolResult('t1', 'A', 'u2'), toolResult('t2', 'B', 'u3'),
+    step('m2', '2024-06-01T10:20:00Z', usage(1100, 50),
+      [{ type: 'tool_use', id: 't3', name: 'Bash', input: { command: 'ls' } }], 'claude-opus-4-6'),
+    toolResult('t3', 'x', 'u4'),
+    step('m3', '2024-06-01T10:20:10Z', usage(1200, 50), null, 'claude-opus-4-6'),
+  ];
+  writeTranscript(cfg, 'shape001', entries, 1717200000);
+  const out = await runJson(['shape001'], cfg);
+  const s = out.summary;
+  assert.deepStrictEqual(s.stepShape, { toolCalls: 3, stepsWithTools: 2, parallelSteps: 1, toolsPerStep: 1.5 });
+  assert.deepStrictEqual(s.modelSwitches, { count: 1, models: ['claude-sonnet-4-6', 'claude-opus-4-6'] });
+  assert.strictEqual(s.idleGaps.count, 1);
+  assert.strictEqual(s.idleGaps.longestMs, 20 * 60 * 1000);
+  assert.strictEqual(s.idleGaps.totalMs, 20 * 60 * 1000);
+  assert.strictEqual(s.idleGaps.thresholdMs, 5 * 60 * 1000);
+});

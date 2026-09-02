@@ -59,5 +59,8 @@
   dispatch itself drove — a skill whose instructions shaped the rest of the session (e.g. a
   workflow skill) costs more than its own turns show; its expansion also sits in context as a
   `user-prompt` consumer row with a carried cost.
+- `summary.stepShape` / `modelSwitches` / `idleGaps` — batching (parallelSteps = steps that issued
+  >1 tool call), model changes between steps (each re-writes the cache), and pauses >5 min (phase
+  boundaries where a /compact was cheap).
 - `byModel` / `byAgent` / `subagents` — cost split by model, by subagent task, and the subagent total.
 - `turns` (execution order) carry `kind` / `avgContext` / `peakContext`.

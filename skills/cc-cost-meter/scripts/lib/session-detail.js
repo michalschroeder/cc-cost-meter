@@ -616,6 +616,10 @@ const HIGH_CONTEXT = 200000;
 // A step-to-step cacheRead drop this large marks a context reset (a /compact, a
 // fresh turn that didn't carry prior context, or a /clear).
 const RESET_DROP = 100000;
+// A pause between consecutive main steps longer than this is an idle gap — a natural
+// phase boundary where a /compact would have been cheap (and, past the cache TTL,
+// the cause of a cache rebuild).
+const IDLE_GAP_MS = 5 * 60 * 1000;
 
 // Derived, analysis-ready rollups so a consumer doesn't hand-roll them (and can't
 // cherry-pick a single early call as "the start" or mis-tally tools):
@@ -679,6 +683,30 @@ function buildSummary(main, turns, compactions) {
   const hasBoundaries = compactions.length > 0;
   const manualCompacts = compactions.filter((c) => c.trigger === 'manual').length;
   const autoCompacts = compactions.filter((c) => c.trigger === 'auto').length;
+  // Step shape: the rubric's "fewer, fatter steps". parallelSteps = steps that issued
+  // more than one tool call at once (independent calls batched into one re-read).
+  let toolCalls = 0, stepsWithTools = 0, parallelSteps = 0;
+  for (const c of main) {
+    const k = c.tools.length;
+    toolCalls += k; if (k) stepsWithTools++; if (k > 1) parallelSteps++;
+  }
+  const stepShape = { toolCalls, stepsWithTools, parallelSteps,
+    toolsPerStep: stepsWithTools ? Math.round((toolCalls / stepsWithTools) * 100) / 100 : 0 };
+  // Model switches between consecutive main steps: each one busts the prompt cache
+  // (the whole window is re-written at the cache-write rate).
+  const models = [];
+  let switches = 0;
+  for (let i = 0; i < main.length; i++) {
+    if (!models.includes(main[i].model)) models.push(main[i].model);
+    if (i > 0 && main[i].model !== main[i - 1].model) switches++;
+  }
+  const idleGaps = { count: 0, longestMs: 0, totalMs: 0, thresholdMs: IDLE_GAP_MS };
+  for (let i = 1; i < main.length; i++) {
+    const a = Date.parse(main[i - 1].ts), b = Date.parse(main[i].ts);
+    if (isNaN(a) || isNaN(b)) continue;
+    const g = b - a;
+    if (g > IDLE_GAP_MS) { idleGaps.count++; idleGaps.totalMs += g; if (g > idleGaps.longestMs) idleGaps.longestMs = g; }
+  }
   return {
     durationMs,
     mainSteps: main.length, // main-session billed calls — the denominator the timeline/thinking use (detail.calls also counts subagents)
@@ -705,6 +733,7 @@ function buildSummary(main, turns, compactions) {
     // Claude subscription, ~5min on API keys). count = how many steps re-cached the
     // whole window; extraCost = the cacheWrite $ that bought nothing new.
     cacheRebuilds: { count: rebuildCount, extraCost: rebuildExtraCost },
+    stepShape, modelSwitches: { count: switches, models }, idleGaps,
   };
 }
 
