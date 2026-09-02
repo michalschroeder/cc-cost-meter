@@ -1,0 +1,49 @@
+{
+  "skill_name": "cc-cost-meter",
+  "evals": [
+    {
+      "id": 1,
+      "name": "kitchen-sink-opus-no-compact",
+      "session": "e2d4d698",
+      "prompt": "Grade session e2d4d698 and write the Spending less next time cards.",
+      "expected_output": "Grade 1–2. Names the best compact point with a dollar estimate. Calls out zero batching and Opus on Bash-heavy work. Does not claim reasoning on every step unless stepSource is thinking-blocks. At least one good card.",
+      "assertions": [
+        { "type": "rating_in", "min": 1, "max": 2 },
+        { "type": "rating_near_band", "tolerance": 1 },
+        { "type": "card_mentions", "pattern": "compact after turn|after turn \\d+", "flags": "i" },
+        { "type": "card_mentions", "pattern": "batch|one step|at once|in parallel", "flags": "i" },
+        { "type": "no_card_mentions", "pattern": "auto-?compact", "flags": "i" },
+        { "type": "no_jargon", "words": ["cache_read", "fan-out", "step multiplication", "gate thinking"] },
+        { "type": "cards_between", "min": 3, "max": 6 },
+        { "type": "has_good_card" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "cheap-focused-session",
+      "session": "c39803a8",
+      "prompt": "Grade session c39803a8 and write the Spending less next time cards.",
+      "expected_output": "Grade 4–5. Short, scoped session. Cards are mostly good/warn; no compaction recommendation as the main lever when compactionWhatIf.best is null.",
+      "assertions": [
+        { "type": "rating_in", "min": 4, "max": 5 },
+        { "type": "rating_near_band", "tolerance": 1 },
+        { "type": "no_jargon", "words": ["cache_read", "fan-out", "step multiplication", "gate thinking"] },
+        { "type": "cards_between", "min": 3, "max": 6 },
+        { "type": "has_good_card" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "mid-session-with-subagents",
+      "session": "ed32f1c0",
+      "prompt": "Grade session ed32f1c0 and write the Spending less next time cards.",
+      "expected_output": "Grade 3–4. Credits delegation if subagents carried the heavy reads; otherwise names the dominant consumer row.",
+      "assertions": [
+        { "type": "rating_in", "min": 3, "max": 4 },
+        { "type": "rating_near_band", "tolerance": 1 },
+        { "type": "no_jargon", "words": ["cache_read", "fan-out", "step multiplication", "gate thinking"] },
+        { "type": "cards_between", "min": 3, "max": 6 }
+      ]
+    }
+  ]
+}
