@@ -79,7 +79,9 @@ function isUsablePriceTable(raw) {
 function getModelCosts(map, model) {
   if (!model) return null;
   if (model.includes(':') || /-(q4|bf16|fp16|gguf|f16|f32)$/.test(model)) return null;
-  const name = model.replace(/@.*$/, '').replace(/-\d{8}$/, '');
+  // Strip a context-tier suffix ("claude-opus-5[1m]") — no pricing source keys
+  // the 1M variant separately; the >200K premium is applied per-call via above200k.
+  const name = model.replace(/\[[^\]]*\]$/, '').replace(/@.*$/, '').replace(/-\d{8}$/, '');
   if (map[name]) return map[name];
   if (map[model]) return map[model];
   const keys = Object.keys(map).sort((a, b) => b.length - a.length);
