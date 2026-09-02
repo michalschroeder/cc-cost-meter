@@ -12,6 +12,30 @@ the habits, not the invoice.
 
 ---
 
+## 0. Computed signals — read these before judging
+
+The analyzer already measured most of what this rubric asks you to judge. Start from the numbers;
+use the transcript-derived turn labels only to explain them. Field → what it decides:
+
+| Field | Decides | Rule |
+|---|---|---|
+| `summary.avoidable.band`, `.share` | the grade's starting point | rating = band ± 1; deviation needs an `anchorNote` |
+| `summary.compactionWhatIf.best` | the top lever card | not null → card "compact after turn N" with `estSaving`; null → don't recommend compaction as the main fix |
+| `summary.compactionWhatIf.policy` | how much a compact-when-large habit was worth | `estSaving` is the `excessContext` slice of `avoidable` |
+| `summary.assistantOutput.thinking.stepSource` | whether thinking counts are exact | `thinking-blocks` = exact per-step; `residual-heuristic` = upper estimate, hedge every thinking claim |
+| `thinking.stepsWithThinking / mainSteps` | "reasoning on most steps" | only when > 0.8 AND stepSource = thinking-blocks |
+| `summary.stepShape.parallelSteps`, `.stepsWithTools` | batching | parallelSteps / stepsWithTools < 0.1 on ≥ 20 tool steps = unbatched |
+| `summary.modelSwitches.count` | cache busts | each switch = one full re-write; > 0 is a "warn", ≥ 3 a "bad" |
+| `byModel` | model routing | Opus with `toolTally` dominated by Bash/Read/Edit = mechanical work on the priciest model |
+| `summary.idleGaps`, `summary.cacheRebuilds` | idle cost | rebuild `extraCost` > 5% of bill = "bad" |
+| `summary.compactions[].trigger` | manual vs auto | ground truth; empty = unknown, say nothing |
+| `summary.bySkill` | review-on-implementation | `code-review` / `simplify` / `security-review` in a session that also edited files |
+| `subagents.total / totalCost` | delegation | < 5% on a session with big tool results = nothing offloaded |
+| turn `kind` counts (summaries.json) | spiral / kitchen-sink | ≥ 3 `correction` = spiral; ≥ 3 `new-task` with 0 resets = kitchen-sink |
+| `summary.contextConsumers.top` incl. synthetic rows | what filled the window | name the top rows whatever their tool; an `unexplained` row is stated as such |
+
+---
+
 ## 1. The cost mechanism (the "why" engine)
 
 A session's cost ≈ **context size × number of steps**. Claude re-reads the *entire* live
@@ -107,14 +131,13 @@ hedge them in cards ("~30–40%", "community-reported") rather than stating as g
 **Delegation (subagents) — "one of the most powerful tools"**
 - A subagent reads many files in *its own* window and returns only a summary, so bulk never
   lands in the main context. Use for investigation, log triage, test runs, bulk edits.
-- Cost note: agents use ~4× the tokens of a chat turn, and multi-agent fan-out ~15×; agent
+- Cost note: Community-reported: agents use ~4× the tokens of a chat turn, and multi-agent fan-out ~15×; agent
   *teams* in plan mode ~7× a standard session. So fan-out is for breadth-first, parallelizable,
   high-value work — **not** tightly-coupled coding. Prefer subagents over teams when a task is
   self-contained; cap concurrency; ban recursive spawning.
 
 **Model routing**
-- Default **Sonnet** for ~80–90% of work (SWE-bench ~79.6% vs Opus ~80.8% — the gap is ~1pt
-  while Opus costs ~5× the output). Escalate to **Opus** only for genuinely hard multi-file
+- Default **Sonnet** for ~80–90% of work (Sonnet-class models close most of the gap on routine coding while costing a fraction per output token; check current pricing in the report's Models section). Escalate to **Opus** only for genuinely hard multi-file
   architecture / debugging. Route mechanical subagents to **Haiku**. Opus on rote work, or a
   mid-session model swap that busts the cache, are both gradeable waste.
 
@@ -135,7 +158,7 @@ hedge them in cards ("~30–40%", "community-reported") rather than stating as g
   the instructions that matter. Move sometimes-relevant workflows into **Skills** (load on demand,
   ~100-token metadata footprint) and path-scoped rules.
 - **MCP tool definitions** used to be a silent killer (~1.5–3k tokens/server, always present).
-  Tool Search (on by default since v2.1.7) defers schema loading — ~85% overhead reduction. Still
+  Recent Claude Code versions defer tool-schema loading (Tool Search), which removes most of that overhead. Still
   disable unused servers, and **prefer CLI tools** (`gh`, `aws`, `gcloud`) which add zero listing
   overhead. Tool-selection accuracy also degrades past ~30–50 available tools.
 
@@ -207,6 +230,8 @@ carried tool results + reasoning overhead), tempered by whether the levers above
   obvious `/compact` / subagent / scoping opportunities missed.
 - **1 — Very poor.** Bill dominated by avoidable overhead (>~50%). Kitchen-sink session: huge
   context held throughout, reasoning on nearly every step, no resets.
+
+The analyzer publishes this bracket as `summary.avoidable.band`. Grade from it: move at most one step, and only for a habit the dollar split cannot see (a correction spiral, model churn, a review run on the implementation context).
 
 State numbers when you have them ("$3.43, 76% of the bill, went to reasoning across 148/155
 steps"). Grade the *driving habits*, not the raw dollar total — a large but unavoidable task can
