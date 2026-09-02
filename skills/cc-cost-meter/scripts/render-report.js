@@ -535,7 +535,7 @@ const clampRating = (v) => {
   return Number.isFinite(n) && n >= 1 && n <= 5 ? n : null;
 };
 
-// → { rating: 1–5|null, headline, cards:[{verdict,title,what,why,how}] }.
+// → { rating: 1–5|null, headline, cards:[{verdict,title,what,why,how}], anchor, skipped }.
 // The assessment is always AI-written (the analyzer workflow grades every session via subagents
 // and merges the result into summary.aiAssessment). When it's absent — only a raw manual
 // `render-report.js < detail.json` with no merge step — the grade section renders empty.
@@ -561,9 +561,13 @@ function buildAssessment(detail) {
       how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
     });
   }
-  const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null);
-  if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards };
-  return { rating: null, headline: '', cards };
+  const av = s.avoidable;
+  const anchor = av && Number.isFinite(Number(av.band))
+    ? { band: clampRating(av.band), share: Number(av.share) || 0, total: Number(av.total) || 0 } : null;
+  const skipped = !!(ai && ai.skipped);
+  const hasAi = ai && typeof ai === 'object' && (cards.length || ai.rating != null || skipped);
+  if (hasAi) return { rating: clampRating(ai.rating), headline: String(ai.headline || ''), cards, anchor, skipped };
+  return { rating: null, headline: '', cards, anchor, skipped: false };
 }
 
 // The 1–5 grade badge that sits at the very top of the report. Empty when unrated.
@@ -578,6 +582,9 @@ function ratingBadge(a) {
     <div class="grade-meta"><div class="grade-word">${esc(word)}</div>
       <div class="grade-pips">${pips}</div>` +
     (a.headline ? `<div class="grade-line">${esc(a.headline)}</div>` : '') +
+    (a.anchor && a.anchor.band != null
+      ? `<div class="grade-anchor">Computed anchor: ${a.anchor.band}/5 — ~${Math.round(a.anchor.share * 100)}% of the bill looks avoidable (${money(a.anchor.total)})</div>`
+      : '') +
     `</div></div>`;
 }
 
@@ -585,8 +592,8 @@ function ratingBadge(a) {
 // "Keep it up" on a good card (reinforce) and "How to fix" on a bad/warn card; omitted if empty.
 function assessmentCards(a) {
   if (!a.cards.length) {
-    return '<div class="acard acard-good"><div class="ablk"><span class="atext">No assessment ' +
-      'available for this session.</span></div></div>';
+    const msg = a.skipped && a.headline ? a.headline : 'No assessment available for this session.';
+    return `<div class="acard acard-good"><div class="ablk"><span class="atext">${esc(msg)}</span></div></div>`;
   }
   const blk = (label, text) => text
     ? `<div class="ablk"><span class="alabel">${label}</span><span class="atext">${esc(text)}</span></div>` : '';
