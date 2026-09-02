@@ -8,9 +8,9 @@
   parent's 200k+. It returns only a few-KB summary. So fan-out (planning, parallel review
   lenses, research) costs cents. In one measured $32.94 session, all 11 subagents (226 calls)
   were **$1.04 (3%)**; the main session (192 calls) was **$31.90 (97%)**.
-- `summary.highContextCost` = the FULL spend on calls **above 200k context** — an **upper bound**
-  on what earlier compaction could have saved (a `/compact` shrinks context to a summary, not
-  zero, and the post-compact steps still cost something), not the exact saving.
+- `summary.compactionWhatIf` is the placed, quantified version of that lever: `best` names the
+  turn after which one `/compact` would have saved the most, `policy` what a compact-when-over-120k
+  habit would have saved. `summary.highContextCost` stays the coarse upper bound.
 - `summary.byTurnKind` "subagent-orchestration" cost is **not** the subagents — it's the parent
   taking steps while already at 200k+. The fix is always: shrink the parent's context.
 

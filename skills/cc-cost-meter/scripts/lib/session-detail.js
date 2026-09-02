@@ -5,6 +5,7 @@ const { getModelCosts } = require('./pricing');
 const { calculateCostBreakdown, extractCacheCreation } = require('./cost-compute');
 const { dayKey } = require('./cost-aggregate');
 const { parseCompactions } = require('./transcript');
+const { buildCompactionWhatIf } = require('./compaction-whatif');
 
 // Every token estimate below sizes text at ~this many characters per token.
 const CHARS_PER_TOKEN = 4;
@@ -413,6 +414,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     bySkill.set(name, e);
   }
   summary.bySkill = [...bySkill.values()].sort((a, b) => b.cost - a.cost);
+  summary.compactionWhatIf = buildCompactionWhatIf(mainCalls, compactions);
   return {
     total, calls, components,
     unpriced, unpricedModels: [...unpricedModels],

@@ -314,3 +314,48 @@ test('smoke: consumers expose an unexplained row when peak > attributed', async 
   assert.ok(row && row.synthetic && row.carriedCost === 0);
   assert.strictEqual(row.estTokens, cc.unexplainedTokens);
 });
+
+// Simulated /compact at turn boundaries. Rate = sonnet-4-6 cache-read 3e-7/token.
+// Boundary after turn 1 (ctx 150k): summarization 150k, later steps shrink by 135k
+// each (post = 15k): saving = (160+170+180 − 25−35−45 − 150)k × r = 255k × r.
+// Boundary after turn 2 (ctx 170k): only one later step → negative. So best = turn 1.
+test('smoke: compactionWhatIf finds the best boundary and a policy saving', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    step('m2', '2024-06-01T10:00:05Z', usage(150000, 4)),
+    user('t2', 'u2'),
+    step('m3', '2024-06-01T10:00:10Z', usage(160000, 4)),
+    step('m4', '2024-06-01T10:00:15Z', usage(170000, 4)),
+    user('t3', 'u3'),
+    step('m5', '2024-06-01T10:00:20Z', usage(180000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif001', entries, 1717200000);
+  const out = await runJson(['whatif001'], cfg);
+  const w = out.summary.compactionWhatIf;
+  const r = 3e-7;
+  assert.strictEqual(w.postTokensAssumed, 15000);
+  assert.strictEqual(w.triggerTokens, 120000);
+  assert.strictEqual(w.best.afterTurn, 1);
+  assert.strictEqual(w.best.afterStep, 2);
+  assert.strictEqual(w.best.contextThen, 150000);
+  assert.ok(Math.abs(w.best.estSaving - 255000 * r) < 1e-9, String(w.best.estSaving));
+  assert.deepStrictEqual(w.policy.atTurns, [1]);
+  assert.strictEqual(w.policy.compactions, 1);
+  assert.ok(Math.abs(w.policy.estSaving - 255000 * r) < 1e-9);
+});
+
+test('smoke: compactionWhatIf best is null when no boundary saves money', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('t1', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(10000, 4)),
+    user('t2', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(12000, 4)),
+  ];
+  writeTranscript(cfg, 'whatif002', entries, 1717200000);
+  const out = await runJson(['whatif002'], cfg);
+  assert.strictEqual(out.summary.compactionWhatIf.best, null);
+  assert.strictEqual(out.summary.compactionWhatIf.policy.compactions, 0);
+});
