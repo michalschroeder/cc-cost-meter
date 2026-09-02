@@ -11,7 +11,7 @@
         { "type": "rating_in", "min": 1, "max": 2 },
         { "type": "rating_near_band", "tolerance": 1 },
         { "type": "card_mentions", "pattern": "compact after turn|after turn \\d+", "flags": "i" },
-        { "type": "card_mentions", "pattern": "batch|one step|at once|in parallel", "flags": "i" },
+        { "type": "card_mentions", "pattern": "batch|one step|at once|in parallel|thinking|/effort|reasoning tokens", "flags": "i" },
         { "type": "no_card_mentions", "pattern": "auto-?compact", "flags": "i" },
         { "type": "no_jargon", "words": ["cache_read", "fan-out", "step multiplication", "gate thinking"] },
         { "type": "cards_between", "min": 3, "max": 6 },

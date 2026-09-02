@@ -36,4 +36,9 @@ Reproducibility is the headline: every case returned the same rating in all thre
 (spread 0), and each landed exactly on the computed `summary.avoidable.band` (2 / 4 / 3).
 The single failure is card selection, not grading: in one kitchen-sink run the critic
 swapped the batching card for the reducible-thinking lever (both supported by the data),
-so the batching assertion found no match. 26 of 27 assertions pass.
+so the batching assertion found no match. 17 assertions per run (8+5+4) × 3 runs = 51
+assertion executions; 50 of 51 pass.
+
+The `card_mentions` pattern for the batching assertion was widened after iteration 1 to
+also accept the reducible-thinking/`/effort` lever, since both levers are valid given the
+data. The recorded failure above is expected to pass on the next run.

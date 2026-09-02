@@ -71,19 +71,41 @@ function main(runsDir) {
   const here = __dirname;
   const evals = JSON.parse(fs.readFileSync(path.join(here, 'evals.json'), 'utf8')).evals;
   const rows = [];
+  const zeroRunCases = [];
   for (const e of evals) {
     const dir = path.join(runsDir, e.name);
     let files = []; try { files = fs.readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f)).sort(); } catch { /* no runs */ }
-    const fixture = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', `${e.name}.grader.json`), 'utf8'));
+    if (!files.length) { zeroRunCases.push(e.name); continue; }
+    let fixture;
+    try {
+      fixture = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', `${e.name}.grader.json`), 'utf8'));
+    } catch (err) {
+      const p = path.join(here, 'fixtures', `${e.name}.grader.json`);
+      console.error(err.code === 'ENOENT'
+        ? `missing fixture: ${p} — run ./make-fixtures.sh first`
+        : `unparseable fixture: ${p} — ${err.message}`);
+      process.exit(2);
+    }
     for (const f of files) {
-      const a = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      const fp = path.join(dir, f);
+      let a;
+      try { a = JSON.parse(fs.readFileSync(fp, 'utf8')); }
+      catch (err) { console.error(`unparseable run: ${fp} — ${err.message}`); process.exit(2); }
       const results = checkRun(a, fixture, e.assertions);
       rows.push({ name: e.name, run: f, rating: Number(a.rating), results });
       fs.writeFileSync(path.join(dir, f.replace(/\.json$/, '.grading.json')), JSON.stringify({ expectations: results }, null, 2) + '\n');
     }
   }
+  if (!rows.length) {
+    console.error(`no runs found under ${runsDir} — expected runs/<case>/run-*.json`);
+    process.exit(2);
+  }
   const s = summarize(rows);
   let bad = false;
+  for (const name of zeroRunCases) {
+    bad = true;
+    console.log(`FAIL ${name}: runs=0 pass=0% ratings=[] spread=0 (no run-*.json found)`);
+  }
   for (const c of s.cases) {
     const flag = c.passRate < 1 || c.spread > 1;
     if (flag) bad = true;

@@ -2,7 +2,22 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { checkRun, summarize } = require(path.join(__dirname, '..', '..', 'evals', 'check.js'));
+
+const checkJs = path.join(__dirname, '..', '..', 'evals', 'check.js');
+
+test('main: exits 2 with no stack trace when runs dir has no run-*.json files', () => {
+  let err;
+  try {
+    execFileSync(process.execPath, [checkJs, '/tmp/does-not-exist-runs-evals-test'], { stdio: 'pipe' });
+  } catch (e) { err = e; }
+  assert.ok(err, 'expected non-zero exit');
+  assert.strictEqual(err.status, 2);
+  const stderr = err.stderr.toString();
+  assert.match(stderr, /no runs found under/);
+  assert.doesNotMatch(stderr, /at Object|at Module|\.js:\d+:\d+/);
+});
 
 const fixture = { summary: { avoidable: { band: 2 } } };
 const good = { rating: 2, headline: 'h', cards: [
