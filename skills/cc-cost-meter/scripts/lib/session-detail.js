@@ -79,13 +79,19 @@ function resultChars(content) {
 // payloads, Bash commands, subagent prompts). Used to apportion the call's exact
 // output_tokens across those kinds. Keep LAST per message id, like usage/tools.
 function measureOutput(c) {
-  const p = { text: 0, thinking: 0, toolInput: {} };
+  const p = { text: 0, thinking: 0, toolInput: {}, thinkingBlocks: 0 };
   if (typeof c === 'string') { p.text = c.length; return p; }
   if (!Array.isArray(c)) return p;
   for (const b of c) {
     if (!b) continue;
     if (b.type === 'text' && typeof b.text === 'string') p.text += b.text.length;
-    else if (b.type === 'thinking' && typeof b.thinking === 'string') p.thinking += b.thinking.length;
+    else if (b.type === 'thinking' || b.type === 'redacted_thinking') {
+      // Claude Code stores the block (often with empty text) even when the thinking
+      // text itself is not persisted — the block's presence is the ground truth that
+      // this step reasoned.
+      p.thinkingBlocks += 1;
+      if (typeof b.thinking === 'string') p.thinking += b.thinking.length;
+    }
     else if (b.type === 'tool_use') {
       const n = b.name || '?';
       const t = p.toolInput[n] || { chars: 0, count: 0 };
@@ -359,8 +365,11 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   // totalSteps is the main file's PARSE-ORDER call count — the same index space as
   // each event's afterStep (which counts every parsed main call, incl. ones later
   // dropped by dedup/zero-cost), so steps-remaining doesn't clamp to 0.
+  // Does this transcript record thinking blocks at all? Decides whether the output
+  // residual is attributed per-step (exact) or everywhere (legacy upper bound).
+  const thinkingTracked = mainCalls.some((c) => c.outParts && c.outParts.thinkingBlocks > 0);
   summary.contextConsumers = buildConsumers(
-    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate));
+    consumerEvents, mainParsedSteps, rate, syntheticConsumers(mainCalls, rate, thinkingTracked));
   // What landed in context right before each main call — the likely trigger of
   // that call's reasoning. Keyed by parse-order index; biggest event wins when a
   // batch of tool_results returns at once.
@@ -369,7 +378,7 @@ function buildDetail(mainFile, subagentFiles, pricing) {
     const cur = triggerByIdx.get(e.afterStep);
     if (!cur || e.estTokens > cur.estTokens) triggerByIdx.set(e.afterStep, e);
   }
-  summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx);
+  summary.assistantOutput = buildAssistantOutput(mainCalls, mainIdx, triggerByIdx, thinkingTracked);
   // Top-3 things that landed in context right before each main call — what got
   // newly written into that step — attached per call for the chart tooltip. Same
   // afterStep→call mapping triggerByIdx/mainIdx already use; estTokens only ranks
@@ -414,26 +423,29 @@ function buildDetail(mainFile, subagentFiles, pricing) {
   };
 }
 
-// Apportion one call's exact output_tokens across what the model emitted: prose
-// text, thinking, and the tool_use arguments it wrote. Visible content blocks are
-// sized at ~chars/4; when output_tokens exceed that, the excess is interleaved
-// thinking the transcript didn't store (returned as unstoredThinking) — attributed
-// to the thinking bucket instead of being smeared over tiny tool args. When
-// output_tokens are below the chars/4 estimate, the visible parts scale down
-// proportionally. Blockless content counts as prose.
-function apportionOutput(c) {
+// Apportion one call's exact output_tokens across what the model emitted. Visible
+// blocks are sized at ~chars/4. The residual (output_tokens beyond that estimate) is
+// interleaved thinking ONLY on a step that carries a thinking block; on a step with
+// none it is tokenizer density (dense code/tool args run ~3 chars/token) and is
+// folded back into the visible parts. `tracked` = this session's transcript records
+// thinking blocks at all; when it doesn't (older CC versions), every residual is
+// treated as thinking — the legacy heuristic.
+function apportionOutput(c, tracked) {
   const o = c.tokens.output;
-  const p = c.outParts || { text: 0, thinking: 0, toolInput: {} };
+  const p = c.outParts || { text: 0, thinking: 0, toolInput: {}, thinkingBlocks: 0 };
   const toolChars = Object.values(p.toolInput).reduce((a, t) => a + t.chars, 0);
   const total = p.text + p.thinking + toolChars;
   const visTok = total / CHARS_PER_TOKEN;
-  const scale = o > visTok ? 1 / CHARS_PER_TOKEN : (total > 0 ? o / total : 0);
+  const thought = tracked ? (p.thinkingBlocks || 0) > 0 : true;
+  const residual = total > 0 ? Math.max(0, o - visTok) : 0;
+  const scale = total > 0 ? ((o > visTok && thought) ? 1 / CHARS_PER_TOKEN : o / total) : 0;
   const perTool = {};
   for (const [name, t] of Object.entries(p.toolInput)) perTool[name] = { tok: t.chars * scale, count: t.count };
   return {
-    text: total > 0 ? p.text * scale : o, // blockless content → all prose
+    text: total > 0 ? p.text * scale : o,
     storedThinking: p.thinking * scale,
-    unstoredThinking: total > 0 ? Math.max(0, o - visTok) : 0,
+    unstoredThinking: thought ? residual : 0,
+    thought,
     perTool,
   };
 }
@@ -447,7 +459,7 @@ function apportionOutput(c) {
 // The thinking TEXT itself is unrecoverable (never persisted anywhere); trigger →
 // next-action is the maximum attribution the transcript supports. Null when the
 // session has no billed output.
-function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
+function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx, tracked) {
   const kinds = { text: { tokens: 0, cost: 0 }, thinking: { tokens: 0, cost: 0 }, toolCalls: { tokens: 0, cost: 0 } };
   let stored = 0, unstored = 0, withThinking = 0;
   const steps = [];
@@ -456,7 +468,7 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
     const c = mainCalls[j];
     const o = c.tokens.output;
     if (!o) continue;
-    const a = apportionOutput(c);
+    const a = apportionOutput(c, tracked);
     const think = a.storedThinking + a.unstoredThinking;
     const toolTok = Object.values(a.perTool).reduce((s, t) => s + t.tok, 0);
     const costOf = (tok) => (c.outCost || 0) * (tok / o);
@@ -464,8 +476,8 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
     kinds.thinking.tokens += think; kinds.thinking.cost += costOf(think);
     kinds.toolCalls.tokens += toolTok; kinds.toolCalls.cost += costOf(toolTok);
     stored += a.storedThinking; unstored += a.unstoredThinking;
+    if (a.thought && (think > 0 || tracked)) withThinking += 1;
     if (think > 0) {
-      withThinking += 1;
       const trg = triggerByIdx.get(mainIdx[j]);
       steps.push({
         seq: j + 1, tokens: Math.round(think), // main-session step ordinal (1..mainSteps), not the global billed seq
@@ -487,9 +499,11 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
       'thinking.unstoredTokens = output_tokens beyond the visible content — interleaved thinking the transcript does not store (its text is unrecoverable). ' +
       'It is an UPPER estimate: visible content is sized at ~4 chars/token, and dense code/tool args tokenize denser, so some of the excess is really tool-call payload. ' +
       'thinking.byTurn names which prompts drove the reasoning; thinking.topSteps are the heaviest single bursts, each with its trigger (what landed in context right before) and the action it took next. ' +
-      'Estimates apportioned per call from exact output_tokens.',
+      'Estimates apportioned per call from exact output_tokens. ' +
+      'thinking.stepSource = "thinking-blocks" when the transcript records thinking blocks (stepsWithThinking is then exact and the residual is attributed only to those steps); "residual-heuristic" on older transcripts without blocks (every residual counts as thinking — an upper bound).',
     byKind: kinds,
     thinking: topSteps.length ? {
+      stepSource: tracked ? 'thinking-blocks' : 'residual-heuristic',
       storedTokens: Math.round(stored),
       unstoredTokens: Math.round(unstored),
       stepsWithThinking: withThinking,
@@ -512,7 +526,7 @@ function buildAssistantOutput(mainCalls, mainIdx, triggerByIdx) {
 // kinds by char share (a call with no content blocks counts as text). Without
 // these rows the consumer table explains only a fraction of peak context and
 // reads as if tool results were the whole story.
-function syntheticConsumers(mainCalls, rate) {
+function syntheticConsumers(mainCalls, rate, tracked) {
   if (!mainCalls.length) return [];
   const n = mainCalls.length;
   const first = mainCalls[0].tokens;
@@ -523,11 +537,11 @@ function syntheticConsumers(mainCalls, rate) {
   mainCalls.forEach((c, i) => {
     if (!c.tokens.output) return;
     const f = (n - 1 - i) * rate; // carried $/token for output landing at step i
-    const a = apportionOutput(c);
+    const a = apportionOutput(c, tracked);
     acc.text.tok += a.text; acc.text.carried += a.text * f;
     const think = a.storedThinking + a.unstoredThinking;
     acc.thinking.tok += think; acc.thinking.carried += think * f;
-    if (think > 0) thinkingCalls += 1;
+    if (a.thought && (think > 0 || tracked)) thinkingCalls += 1;
     for (const [name, t] of Object.entries(a.perTool)) {
       toolTok += t.tok; toolCarried += t.tok * f; toolCount += t.count;
       const e = perTool.get(name) || { tok: 0, count: 0 };

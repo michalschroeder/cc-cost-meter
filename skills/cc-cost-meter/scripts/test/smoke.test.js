@@ -48,6 +48,18 @@ const fixture = () => [
       content: [{ type: 'text', text: 'done' }] }, uuid: 'a1' },
 ];
 
+// Build one billed assistant step. `content` blocks default to a single text block.
+function step(id, ts, usage, content, model) {
+  return { type: 'assistant', timestamp: ts, uuid: 'a-' + id,
+    message: { id, role: 'assistant', model: model || 'claude-sonnet-4-6', usage,
+      content: content || [{ type: 'text', text: 'ok' }] } };
+}
+const user = (text, uuid) => ({ type: 'user', message: { role: 'user', content: text }, uuid });
+const toolResult = (toolUseId, text, uuid) => ({ type: 'user', uuid,
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: text }] } });
+const usage = (cacheRead, output, extra) => ({ input_tokens: 0, output_tokens: output,
+  cache_read_input_tokens: cacheRead, cache_creation_input_tokens: 0, ...(extra || {}) });
+
 test('smoke: list payload has the documented top-level keys', async () => {
   const cfg = mkProfile();
   writeTranscript(cfg, 'smoke001', fixture(), 1717200000);
@@ -183,4 +195,52 @@ test('smoke: AskUserQuestion context source carries the question asked', async (
   const out = await runJson(['smoke005'], cfg);
   const mains = out.calls.filter((c) => c.isMain);
   assert.deepStrictEqual(mains[1].contextSources, [{ tool: 'AskUserQuestion', target: 'Pick format A or B?' }]);
+});
+
+// Thinking is attributed only to steps that carry a thinking block. m1 has one
+// (empty text — Claude Code stores the block, not the text); m2 has none, so its
+// output beyond chars/4 is tool-call payload, not reasoning.
+test('smoke: thinking steps counted from thinking blocks, residual only on those steps', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'thinking', thinking: '', signature: 'sig' },
+       { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a b c', 'u2'),
+    step('m2', '2024-06-01T10:00:05Z', usage(1200, 600),
+      [{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'pwd' } }]),
+    toolResult('t2', '/x', 'u3'),
+  ];
+  writeTranscript(cfg, 'think001', entries, 1717200000);
+  const out = await runJson(['think001'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'thinking-blocks');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.mainSteps, 2);
+  // m1 visible = {"command":"ls"} = 16 chars = 4 tok → 596 unstored thinking
+  assert.strictEqual(th.unstoredTokens, 596);
+  // m2: all 600 output tokens are tool-call payload (scaled up, not thinking)
+  const kinds = out.summary.assistantOutput.byKind;
+  assert.strictEqual(kinds.thinking.tokens, 596);
+  assert.strictEqual(kinds.toolCalls.tokens, 604);
+  // synthetic assistant-thinking consumer row counts 1 thinking step
+  const row = out.summary.contextConsumers.top.find((c) => c.tool === 'assistant-thinking');
+  assert.strictEqual(row.count, 1);
+});
+
+test('smoke: no thinking blocks anywhere → legacy residual heuristic, flagged', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(1000, 600),
+      [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    toolResult('t1', 'a', 'u2'),
+  ];
+  writeTranscript(cfg, 'think002', entries, 1717200000);
+  const out = await runJson(['think002'], cfg);
+  const th = out.summary.assistantOutput.thinking;
+  assert.strictEqual(th.stepSource, 'residual-heuristic');
+  assert.strictEqual(th.stepsWithThinking, 1);
+  assert.strictEqual(th.unstoredTokens, 596);
 });
