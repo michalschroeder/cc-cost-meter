@@ -526,3 +526,25 @@ test('smoke: avoidable counts cache rebuilds after an idle gap', async () => {
   assert.ok(Math.abs(s.avoidable.total -
     (s.avoidable.excessContext + s.avoidable.reducibleThinking + s.avoidable.cacheRebuilds)) < 1e-12);
 });
+
+test('smoke: list rows carry the last recorded grade', async () => {
+  const cfg = mkProfile();
+  writeTranscript(cfg, 'graded01', fixture(), 1717200000);
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'csl-st-')); tmpDirs.push(xdg);
+  const { resolveStateDir } = require('../lib/state');
+  const prevXdg = process.env.XDG_STATE_HOME; process.env.XDG_STATE_HOME = xdg;
+  const dir = resolveStateDir(cfg); process.env.XDG_STATE_HOME = prevXdg;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'grades.jsonl'),
+    JSON.stringify({ session: 'graded01', rating: 3, band: 3, share: 0.2, ts: 'a' }) + '\n' +
+    JSON.stringify({ session: 'graded01', rating: 4, band: 3, share: 0.2, ts: 'b' }) + '\n');
+  // runJson spawns with its own XDG_STATE_HOME → override for this call
+  const out = await new Promise((resolve, reject) => {
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg, XDG_STATE_HOME: xdg, STATUSLINE_PRICING_NO_FETCH: '1', STATUSLINE_MONTHLY_BUDGET: '0' };
+    const proc = spawn(process.execPath, [ANALYZE, 'list'], { env });
+    let o = '', e = ''; proc.stdout.on('data', (d) => (o += d)); proc.stderr.on('data', (d) => (e += d));
+    proc.on('close', (c) => c === 0 ? resolve(JSON.parse(o)) : reject(new Error(e)));
+  });
+  assert.strictEqual(out.sessions[0].grade, 4);
+  assert.strictEqual(out.sessions[0].band, 3);
+});

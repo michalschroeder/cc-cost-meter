@@ -2,3 +2,5 @@ node_modules/
 *.log
 /tmp/
 session-cost-*.html
+skills/cc-cost-meter/evals/fixtures/
+skills/cc-cost-meter/evals/runs/

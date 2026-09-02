@@ -12,6 +12,7 @@ const { buildDetail } = require('./lib/session-detail');
 const { sumPeriods } = require('./lib/periods');
 const { resolveBudget } = require('./lib/budget');
 const { resolveStateDir } = require('./lib/state');
+const { readGrades } = require('./lib/grades');
 
 function parseArgs(argv) {
   const opts = { last: null, since: null, configDir: undefined, detail: undefined };
@@ -97,7 +98,7 @@ function analysisPayload(detail, id, ts, title, recap) {
 }
 
 // Session list as JSON for an LLM/agent: one record per session, plus period totals.
-function listPayload(rows, costOf, per, budget) {
+function listPayload(rows, costOf, per, budget, grades) {
   return {
     sessions: rows.map((r) => {
       const { title, recap } = readTitleRecap(r.file);
@@ -107,6 +108,8 @@ function listPayload(rows, costOf, per, budget) {
         recap: recap || null,
         startedAt: new Date(r.ts * 1000).toISOString(),
         cost: costOf(r.id),
+        grade: grades && grades.has(r.id) ? grades.get(r.id).rating : null,
+        band: grades && grades.has(r.id) ? grades.get(r.id).band : null,
       };
     }),
     periods: { today: per.daily, week: per.weekly, month: per.monthly },
@@ -154,8 +157,9 @@ function main() {
   const costOf = (id) => { const ps = agg.perSession[id]; return ps ? ps.total : 0; };
   const budget = resolveBudget(process.env.STATUSLINE_MONTHLY_BUDGET);
   const per = sumPeriods(agg.perSession, new Date());
+  const grades = readGrades(stateDir);
   const emitJson = (rs) => process.stdout.write(
-    JSON.stringify(listPayload(rs, costOf, per, budget), null, 2) + '\n');
+    JSON.stringify(listPayload(rs, costOf, per, budget, grades), null, 2) + '\n');
 
   if (sinceTs != null) rows = rows.filter((r) => r.ts >= sinceTs);
   const cap = opts.last != null ? opts.last : (opts.since ? Infinity : 10);

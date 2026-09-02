@@ -63,6 +63,7 @@ The cost math is the substance. Key modules:
   per-turn rollups, `contextGrowth`, `contextConsumers`, `assistantOutput.thinking`, `bySkill`,
   `highContextCost`. Precomputes all rollups so consumers do **not** re-aggregate `calls[]`.
 - `pricing.js` — load the bundled `data/model_prices.json` snapshot (offline; no network).
+- `grades.js` — appends/reads `grades.jsonl` in the XDG state dir; per-session grade history shown by `list`.
 
 **Do not re-aggregate `calls[]` to recompute totals** — the precomputed `summary.*` rollups are
 the honest numbers; raw re-aggregation over-counts tools ~3× and invents false growth. This is a

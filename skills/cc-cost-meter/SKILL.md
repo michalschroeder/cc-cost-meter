@@ -65,7 +65,8 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
 1. **Select the session.**
    - If the user gave a session id/prefix, skip to step 2 with it.
    - Otherwise run `node ${CLAUDE_SKILL_DIR}/scripts/analyze.js list --last 10`, summarize the sessions
-     inline (`title · $cost · age`), and ask which one to analyze.
+     inline (`title · $cost · age`, or `title · $cost · grade N/5 · age` when a row has a recorded
+     grade), and ask which one to analyze.
 
 2. **Pull the detail.** Run
    `node ${CLAUDE_SKILL_DIR}/scripts/analyze.js <prefix> > /tmp/detail.json` once, then read
@@ -148,9 +149,11 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
 
      ```bash
      # 2. Merge + render (the renderer needs the FULL detail, not grader.json):
-     node ${CLAUDE_SKILL_DIR}/scripts/apply-summaries.js --summaries /tmp/summaries.json < /tmp/detail.json \
+     node ${CLAUDE_SKILL_DIR}/scripts/apply-summaries.js --summaries /tmp/summaries.json --record-grade < /tmp/detail.json \
        | node ${CLAUDE_SKILL_DIR}/scripts/render-report.js
      ```
+     Add `--config-dir <path>` (same value passed to `analyze.js`) when the user gave one, so the
+     grade is recorded under that profile's state dir.
 
      `/tmp/summaries.json` final shape:
      `{ "turns": { "<turnIndex>": { "summary": "…", "kind": "…" } }, "consumers": { "<index>": "…" },
