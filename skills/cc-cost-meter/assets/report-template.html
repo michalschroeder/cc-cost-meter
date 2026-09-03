@@ -100,7 +100,7 @@
 
   /* The literal picture frame: an 8px black border the whole window sits inside.
      Full-bleed — the browser window itself is the printed picture frame. */
-  .frame { margin:16px; background:var(--canvas); border:8px solid var(--frame); }
+  .frame { margin:16px auto; max-width:1240px; background:var(--canvas); border:8px solid var(--frame); }
   .wrap { padding:0 28px 40px; }
 
   /* Tint helpers — one catalog colour per section, applied as flat eyebrow/card fills. */
@@ -150,8 +150,7 @@
   @media print { body.basic .adv { display:revert; } .toc-adv { display:none; } }
 
   /* Metric "ribbon cards": white Helvetica title bar + flat tinted body block. */
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px;
-    margin:22px 0 26px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px; }
   .card { border:1px solid var(--frame); background:var(--canvas); }
   .card .ctitle { font-family:var(--font-head); font-weight:700; text-transform:uppercase; font-size:13px;
     letter-spacing:.02em; color:var(--ink); background:var(--canvas); padding:6px 12px;
@@ -162,11 +161,16 @@
   .card .k { font-family:var(--font-body); font-size:15px; color:#1a1a1a; margin-top:7px; line-height:1.35; }
 
   /* Cost-formula CTA — the single Dell-red fill panel (cream Times copy). One per page. */
+  /* Cards and the red cost-formula panel share one row — the panel is a definition,
+     not the headline, so it no longer takes a full screen of 24px reversed type. */
+  .topgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px;
+    margin:22px 0 26px; align-items:stretch; }
+  @media (max-width:900px) { .topgrid { grid-template-columns:1fr; } }
   .primer { background:var(--red); color:#fff3e0; border:1px solid var(--frame);
-    padding:18px 22px; margin:0 0 30px; }
+    padding:16px 20px; }
   .primer .formula { font-family:var(--font-head); font-weight:700; text-transform:uppercase;
-    font-size:23px; letter-spacing:.02em; color:#fff; margin-bottom:10px; }
-  .primer p { margin:0; font-family:var(--font-body); color:#fff3e0; font-size:24px; line-height:1.5; }
+    font-size:21px; letter-spacing:.02em; color:#fff; margin-bottom:10px; }
+  .primer p { margin:0; font-family:var(--font-body); color:#fff3e0; font-size:18px; line-height:1.45; }
 
   /* Section eyebrows: chunky Arial-Black caps on a flat catalog-tint block, heavy black underline. */
   h2 { font-family:var(--font-display); font-weight:900; text-transform:uppercase; font-size:23px;
@@ -175,11 +179,17 @@
     padding:13px 16px; margin:40px 0 14px; scroll-margin-top:72px; }
   /* Reasoning sections take the periwinkle tint so the "thinking" family reads from the heading. */
   h2.think { background:var(--t-periwinkle); }
-  h3 { font-family:var(--font-head); font-weight:700; text-transform:uppercase; font-size:15px;
+  h3 { font-family:var(--font-head); font-weight:700; text-transform:uppercase; font-size:14px;
     letter-spacing:.02em; color:var(--ink); margin:32px 0 8px; }
   /* Full available width, larger catalog body copy. */
-  .explain { font-family:var(--font-body); color:#222; font-size:24px; line-height:1.5;
-    margin:0 0 18px; }
+  /* Explanatory prose sets in two newspaper columns: keeps a readable ~60-character
+     measure without leaving half the catalog page empty, and drops below the 23px
+     section heading it explains (it used to be 24px, i.e. larger). */
+  .explain { font-family:var(--font-body); color:#222; font-size:19px; line-height:1.5;
+    margin:0 0 18px; text-wrap:pretty; column-width:28em; column-gap:40px; }
+  /* Below the width where two columns fit, fall back to one capped at a readable measure
+     rather than one column the full width of the page. */
+  @media (max-width:1120px) { .explain { column-width:auto; max-width:66ch; } }
   .explain strong { color:var(--ink); font-weight:bold; }
 
   /* Side-by-side section grid: three compact panels that auto-fit into columns. */
@@ -203,7 +213,8 @@
   .grade-pips { display:flex; gap:5px; }
   .grade-pips .pip { width:28px; height:13px; border:1px solid var(--frame); background:var(--canvas); }
   .grade-pips .pip.on { background:var(--gcol,#888); }
-  .grade-line { font-family:var(--font-body); font-size:21px; line-height:1.4; color:#222; }
+  .grade-line { font-family:var(--font-body); font-size:18px; line-height:1.4; color:#222;
+    max-width:78ch; }
   .grade-anchor { font-size:.8rem; opacity:.75; margin-top:.25rem; }
   .grade-1{--gcol:var(--red)} .grade-2{--gcol:#e6915d} .grade-3{--gcol:#d6a40c}
   .grade-4{--gcol:#7a9a3e} .grade-5{--gcol:#4f7a2f}
@@ -218,22 +229,22 @@
   .acard-good{--acol:#6f9438;--ahdr:#bcd49f;--abg:#eaf2dd}
   .acard-warn{--acol:#cf9b0a;--ahdr:#e9d08a;--abg:#f7eecb}
   .acard-bad {--acol:#c2603c;--ahdr:#e0a892;--abg:#f4ded2}
-  .acard-title { font-family:var(--font-head); font-weight:700; text-transform:uppercase; font-size:15px;
+  .acard-title { font-family:var(--font-head); font-weight:700; text-transform:uppercase; font-size:14px;
     letter-spacing:.02em; color:var(--ink); padding:11px 16px; background:var(--ahdr,rgba(255,255,255,.32));
     border-bottom:1px solid var(--frame); }
   .ablk { padding:10px 16px; border-bottom:1px dashed rgba(0,0,0,.28); }
   .ablk:last-child { border-bottom:0; }
   .alabel { display:block; font-family:var(--font-head); font-weight:700; text-transform:uppercase;
     font-size:12px; letter-spacing:.04em; color:var(--ink); opacity:.65; margin-bottom:3px; }
-  .atext { font-family:var(--font-body); font-size:19px; line-height:1.45; color:var(--ink); }
+  .atext { font-family:var(--font-body); font-size:17px; line-height:1.45; color:var(--ink); }
 
   /* Catalog data tables: full 1px black HTML-3.2 grid, black header bar, Times body, zebra stripe. */
   table { width:100%; border-collapse:collapse; background:var(--canvas);
     border:1px solid var(--frame); margin-bottom:14px; }
   td, th { text-align:left; padding:9px 14px; border:1px solid var(--frame); vertical-align:top; }
   thead th { background:var(--frame); color:var(--canvas); font-family:var(--font-head); font-weight:700;
-    text-transform:uppercase; font-size:14px; letter-spacing:.02em; }
-  tbody td { font-family:var(--font-body); font-size:18px; }
+    text-transform:uppercase; font-size:13px; letter-spacing:.02em; }
+  tbody td { font-family:var(--font-body); font-size:16px; }
   th.num, td.num { text-align:right; }
   td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
   tbody tr:nth-child(even) { background:var(--zebra); }
@@ -256,7 +267,7 @@
   .ctx-chart .ctx-axis { fill:var(--dim); font-size:10px; font-family:var(--font-head); }
   .ctx-bar:hover { opacity:.7; }
   .ctx-legend { display:flex; gap:16px; flex-wrap:wrap; color:#222; font-family:var(--font-body);
-    font-size:18px; margin:10px 0 0; }
+    font-size:15px; margin:10px 0 0; }
   .ctx-legend i { display:inline-block; width:14px; height:14px; border:1px solid var(--frame);
     margin-right:7px; vertical-align:-1px; }
   #ctx-readout, #grow-readout { color:#222; font-family:var(--font-body); font-size:16px;
@@ -362,6 +373,7 @@
       aria-controls="thinking reference toc-thinking toc-skill toc-model toc-subagents">Show advanced</button>
   </nav>
 
+  <div class="topgrid">
   <div class="cards">
     <div class="card tint-sage">
       <div class="ctitle">Steps</div>
@@ -383,41 +395,36 @@
 
   <div class="primer">
     <div class="formula">cost ≈ context size × steps</div>
-    <p>Every time the model does something, like writing a reply or running a tool, it first
-    re-reads the whole conversation up to that point. So the cost of a session depends less on
-    what you asked and more on how much had already piled up by the time you asked it. A quick
-    question late in a long chat can cost more than a big task right at the start. Each section
-    below answers one question about this session, and the note under each heading tells you
-    how to read it.</p>
+    <p>Every step re-reads the whole conversation before it acts. So a session's cost depends
+    less on what you asked than on how much had already piled up when you asked it — a quick
+    question late in a long chat can cost more than a big task at the start. Each section below
+    answers one question, and the note under its heading tells you how to read it.</p>
+  </div>
   </div>
 
   <section id="assessment">
   <h2 class="tint-olive">Spending less next time</h2>
-  <p class="explain">An assessment of this session: where the money went and what to do differently.
-  Read the cards as leads to check, not as final verdicts. The cost of a session is driven mostly by
-  one thing, the size of the context multiplied by the number of steps, because everything left in
-  the conversation is re-read on every later step. That makes keeping the context small, with /compact
-  or a fresh session, almost always the biggest lever. When a card blames a more visible detail, such
-  as a short "do it" prompt or one expensive skill, it is often pointing at <em>where</em> the spend
-  happened rather than the underlying cause: that same prompt would have cost about the same in any
-  large context, because what you paid for was re-reading the window it ran in, not the words you
-  typed. So treat each card as a place to look, confirm it against the tables above, and act on the
-  structural lever (a smaller context) before the cosmetic one (longer prompts).</p>
+  <p class="explain">Where the money went and what to do differently. Read the cards as leads to
+  check, not as final verdicts. Cost is driven mostly by context size × steps, because everything
+  left in the conversation is re-read on every later step — so keeping the context small, with
+  /compact or a fresh session, is almost always the biggest lever. When a card blames a short "do
+  it" prompt or one expensive skill, it is usually pointing at <em>where</em> the spend happened,
+  not the cause: that prompt would have cost the same in any large context, because you paid for
+  re-reading the window, not the words you typed. Confirm each card against the tables, and act on
+  the structural lever (a smaller context) before the cosmetic one.</p>
   <div class="assess">{{ASSESS_CARDS}}</div>
   </section>
 
   <h2 id="context" class="tint-olive">Context window over time</h2>
-  <p class="explain">One bar per step, left to right in time order. The full height of a bar is
-  how big the conversation was at that moment, in tokens (roughly, pieces of words). Because every
-  step re-reads everything before it, <strong>taller bars cost more</strong>. Each bar has two
-  parts: a solid <strong>re-read</strong> base — context already cached, read back cheaply, colored
-  green / amber / red by size — and a hatched <strong>written</strong> cap on top: new material
-  cached that step. Normally the cap is thin. When it suddenly fills the whole bar, the prompt cache
-  expired (after a long idle gap) and that step had to re-write the entire window from scratch —
-  marked with a ↻ below. That is <em>not</em> the conversation shrinking; the height stays the same,
-  it just turns all-written. A dashed red line is the real thing: a /compact or clear where the
-  total actually dropped. The axis underneath shows minutes from the start, so you can see where the
-  long gaps were. Hover any bar for its split, cost, and the message it was working on.</p>
+  <p class="explain">One bar per step, in time order. A bar's full height is how big the
+  conversation was at that moment, in tokens (roughly, pieces of words); because every step re-reads
+  everything before it, <strong>taller bars cost more</strong>. The solid base is context
+  <strong>re-read</strong> from cache, coloured green / amber / red by size; the hatched cap is new
+  material <strong>written</strong> that step, normally thin. A cap that fills the whole bar means
+  the prompt cache expired after a long idle gap and the window was re-written from scratch (marked
+  ↻) — <em>not</em> the conversation shrinking. A dashed red line is the real thing: a /compact or
+  clear where the total dropped. The axis shows minutes from the start, so the long gaps are
+  visible. Hover any bar for its split, cost, and the message it was working on.</p>
   {{CONTEXT_TIMELINE}}
   <div class="ctx-legend">
     <span><i class="c-low"></i>re-read, under 100k (comfortable)</span>
@@ -432,15 +439,13 @@
   {{CACHE_REBUILD_CALLOUT}}
 
   <h3>The same growth, grouped by message: who added what</h3>
-  <p class="explain">The chart above uses many bars for a single message. This one is simpler:
-  each message you sent gets one block. Read it left to right as the conversation filling up. The
-  grey block at the start is the fixed setup that is always there before you type anything (the
-  system instructions, the list of available tools, and the project background). Each colored
-  block after it is one of your messages, and its width is <strong>how much that message added to
-  the conversation</strong>: everything it read, ran, or wrote that every later step then had to
-  re-read. Wide blocks are the messages that made the session expensive. A black dashed line is a
-  /compact or context clear wiping it back down. Hover over a block to see the message, how far it
-  pushed the conversation (from one size to the next), and what that turn cost.</p>
+  <p class="explain">The same growth, one block per message instead of one bar per step. Read it
+  left to right as the conversation filling up. The grey block is the fixed setup that is always
+  there before you type: system instructions, the tool list, and the project background. Each
+  coloured block after it is one of your messages, and its width is <strong>how much that message
+  added</strong> — everything it read, ran, or wrote that every later step then had to re-read. Wide
+  blocks are what made the session expensive. A black dashed line is a /compact or clear wiping it
+  back down. Hover a block for the message, how far it pushed the conversation, and what it cost.</p>
   {{CONTEXT_GROWTH_BAR}}
   <div class="ctx-legend">
     <span><i class="c-dim"></i>fixed setup</span>
@@ -453,66 +458,62 @@
 
   <section>
     <h2 id="where" class="tint-sage">Where it went</h2>
-    <p class="explain">Your total cost, split into the four things you actually pay for.
-    <strong>cache read</strong> is the model re-reading the conversation at every step. This is
-    usually the biggest slice, and the main reason long sessions get expensive.
-    <strong>output</strong> is everything the model wrote back, including the private thinking you
-    never see. <strong>cache write</strong> is the cost of saving new material once, so that later
-    steps can re-read it more cheaply. <strong>input</strong> is brand-new text that has not been
-    saved yet, and it is usually tiny.</p>
+    <p class="explain">Your total, split into the four things you actually pay for.
+    <strong>cache read</strong> is the model re-reading the conversation at every step — usually the
+    biggest slice, and the main reason long sessions get expensive. <strong>output</strong> is
+    everything it wrote back, including the private thinking you never see. <strong>cache write</strong>
+    saves new material once so later steps re-read it cheaply. <strong>input</strong> is brand-new
+    text, usually tiny.</p>
     <table><thead><tr><th scope="col" data-sort="text">component</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col">share</th></tr></thead>
     <tbody>{{WHERE_IT_WENT_ROWS}}</tbody></table>
   </section>
 
   <h2 id="consumers" class="tint-salmon">What filled the context</h2>
   <p class="explain">What took up room in the conversation. <strong>carried cost</strong> is the
-  repeat charge for keeping it around: once a file or a command's output lands in the conversation,
-  the model re-reads it at every later step until the session ends or the conversation is cleared. A
-  big row here is a good thing to hand off to a helper (a subagent) next time — the helper reads it in
-  its own separate conversation and sends back only a short summary, so the bulky original never weighs
-  down your main chat.</p>
+  repeat charge for keeping it around: once a file or a command's output lands here, the model
+  re-reads it at every later step until the session ends or the conversation is cleared. A big row
+  is a good candidate to hand to a helper (a subagent) next time — it reads the bulky original in
+  its own conversation and sends back only a short summary.</p>
   <h3>By tool — where it came from</h3>
   <table><thead><tr><th scope="col" data-sort="text">tool</th><th scope="col" class="num" data-sort="num" data-sum="int">results</th><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col">share</th></tr></thead>
   <tbody>{{CONSUMER_TOOL_ROWS}}</tbody></table>
   <h3>Item by item — the exact file, command, or message</h3>
-  <p class="explain">A <strong>×3</strong> after a tool name means the same thing landed three times;
-  a file read three times costs its full size three times over, plus the repeat charge for keeping each
-  copy around. The <strong>assistant-*</strong> rows are the model's own words: its visible replies
-  (assistant-text), its private thinking (assistant-thinking), and the text it typed into its tools
-  (assistant-tool-calls). When those rows are near the top, the cost came mostly from how much the
-  model itself wrote, not from what it read.</p>
+  <p class="explain">A <strong>×3</strong> after a tool name means the same thing landed three
+  times: a file read three times costs its full size three times over, plus the repeat charge for
+  each copy. The <strong>assistant-*</strong> rows are the model's own words — visible replies
+  (assistant-text), private thinking (assistant-thinking), and text typed into tools
+  (assistant-tool-calls). Those rows near the top mean the cost came from what the model wrote, not
+  what it read.</p>
   <table id="consumers-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">est tokens</th><th scope="col">share</th><th scope="col" class="num" data-sort="num" data-sum="money">carried cost</th><th scope="col" data-sort="text">tool</th><th scope="col">target (file · command · prompt)</th></tr></thead>
   <tbody>{{CONSUMER_ROWS}}</tbody></table>
   <p class="note">{{CONSUMERS_NOTE}}</p>
 
   <h2 id="turns" class="tint-salmon">Top turns</h2>
-  <p class="explain">Your messages, ranked by how much the work each one set off ended up costing.
-  <strong>peak ctx</strong> is how full the conversation was while that work was running. The same
-  task costs several times more when the conversation is already large than when it is small, which
-  is why a short message late in a session can cost more than a big one asked at the start.</p>
+  <p class="explain">Your messages, ranked by what the work each one set off ended up costing.
+  <strong>peak ctx</strong> is how full the conversation was while that work ran. The same task costs
+  several times more in a large conversation than a small one — which is why a short message late in
+  a session can beat a big one asked at the start.</p>
   <table id="turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="money">cost</th><th scope="col" data-sort="text">kind</th><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num">peak ctx</th><th scope="col">what</th></tr></thead>
   <tbody>{{TOP_TURNS_ROWS}}</tbody></table>
 
   <section id="thinking" class="adv">
   <h2 class="think">Reasoning: what it cost</h2>
-  <p class="explain">Before most replies and tool actions, the model thinks privately. That thinking
-  is charged at the output rate, the most expensive rate, but the text is never saved anywhere, so
-  no tool can show it to you. The <strong>interleaved</strong> figure is exactly that hidden
-  thinking. The table shows which of your messages set off the most reasoning. A lot of steps under
-  one message usually means a debugging loop: every test run or error that comes back sets off
-  another round of thinking. The fix is fewer, bigger steps, for example running several commands at
-  once or handing a repetitive retry loop to a helper. It is not about making the model "think
+  <p class="explain">Before most replies and tool actions the model thinks privately. That thinking
+  is charged at the output rate, the most expensive one, but the text is never saved, so no tool can
+  show it to you — the <strong>interleaved</strong> figure is exactly that. The table shows which of
+  your messages set off the most reasoning. Many steps under one message usually means a debugging
+  loop: every test run or error sets off another round. The fix is fewer, bigger steps — several
+  commands at once, or a repetitive retry loop handed to a helper — not making the model "think
   less".</p>
   <p class="note">{{THINKING_SUMMARY}}</p>
   <table id="thinking-turns-table" data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">tokens</th><th scope="col">share</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col">prompt that drove the reasoning</th></tr></thead>
   <tbody>{{THINKING_TURN_ROWS}}</tbody></table>
   <h3>Biggest reasoning bursts</h3>
-  <p class="explain">The individual steps where the model thought the hardest.
-  <strong>trigger</strong> is what had just landed in the conversation, the tool result or message
-  it was reacting to. <strong>next action</strong> is what it decided to do next. A big burst right
-  before an important action, like making a large edit, is just the model taking time to plan, which
-  is normal. But repeated bursts after the same command usually mean the model kept working out the
-  same answer over and over, a sign that loop would have been better handed to a helper.</p>
+  <p class="explain">The individual steps where the model thought hardest.
+  <strong>trigger</strong> is the tool result or message it was reacting to; <strong>next action</strong>
+  is what it decided to do. A big burst right before a large edit is just planning, which is normal.
+  Repeated bursts after the same command mean it kept re-deriving the same answer — a sign that loop
+  belonged with a helper.</p>
   <table data-total-label="Total (shown)"><thead><tr><th scope="col" class="num" data-sort="num" data-sum="tokens">tokens</th><th scope="col" class="num" data-sort="num">step</th><th scope="col">trigger (what landed in context right before)</th><th scope="col">next action</th></tr></thead>
   <tbody>{{THINKING_STEP_ROWS}}</tbody></table>
   </section>
@@ -520,29 +521,27 @@
   <div class="trio adv" id="reference">
     <section>
       <h2 id="skill" class="tint-lime">By skill</h2>
-      <p class="explain">What each skill you used cost, counting only the steps the skill's own
-      instructions set in motion. A skill that shapes the whole session (like a workflow or a review
-      skill) really costs more than this number shows. Its instructions also stay in the
-      conversation, listed as a <strong>user-prompt</strong> row in the table above, adding to the
-      cost of every later step.</p>
+      <p class="explain">What each skill cost, counting only the steps its own instructions set in
+      motion. A skill that shapes the whole session costs more than this shows: its instructions also
+      stay in the conversation as a <strong>user-prompt</strong> row above, adding to every later
+      step.</p>
       <table><thead><tr><th scope="col" data-sort="text">skill</th><th scope="col" class="num" data-sort="num" data-sum="int">dispatches</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
       <tbody>{{SKILL_ROWS}}</tbody></table>
     </section>
     <section>
       <h2 id="model" class="tint-sky">By model</h2>
-      <p class="explain">A single session can use more than one model, for example a cheaper one
-      for quick steps. These costs are worked out from the raw token counts and the public price per
-      token, so they may not exactly match the figure the app shows you.</p>
+      <p class="explain">A session can use more than one model, for example a cheaper one for quick
+      steps. These costs come from the raw token counts and public per-token prices, so they may not
+      exactly match the figure the app shows.</p>
       <table><thead><tr><th scope="col" data-sort="text">model</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
       <tbody>{{BY_MODEL_ROWS}}</tbody></table>
     </section>
     <section>
       <h2 id="subagents" class="tint-steel">Subagents</h2>
-      <p class="explain">Smaller side jobs the session handed off to helpers. Each helper works in
-      its own short, separate conversation and sends back only a summary, so they usually cost just a
-      few cents. If this list is short but the main session was expensive, the way to save money is to
-      hand off more of the exploring to helpers, not to cut back on the ones you already have.
-      <em>Steps</em> is how many model turns a helper took — a rough measure of how much work it did.</p>
+      <p class="explain">Side jobs handed off to helpers. Each works in its own short conversation
+      and sends back only a summary, so they usually cost a few cents. A short list beside an
+      expensive session means the fix is handing off <em>more</em> exploring, not fewer helpers.
+      <em>Steps</em> is how many model turns a helper took — roughly, how much work it did.</p>
       <table><thead><tr><th scope="col" data-sort="text">task</th><th scope="col" class="num" data-sort="num" data-sum="int">steps</th><th scope="col" class="num" data-sort="num" data-sum="money">cost</th></tr></thead>
       <tbody>{{SUBAGENT_ROWS}}</tbody></table>
     </section>
