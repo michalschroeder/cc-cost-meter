@@ -70,6 +70,10 @@
 - `summary.stepShape` / `modelSwitches` / `idleGaps` — batching (parallelSteps = steps that issued
   >1 tool call), model changes between steps (each re-writes the cache), and pauses >5 min (phase
   boundaries where a /compact was cheap).
+- `summary.cacheRebuilds` — { count, extraCost, expired, invalidated }: steps that re-wrote the whole
+  window. `expired` = idle gap ≥ cache TTL; `invalidated` = cache still alive but the prompt prefix
+  changed (skill/slash command load, tool or permission change) — /compact would not have avoided
+  those. Per step: `calls[].cacheRebuild` = { cause, gapMs, ttlMs, survivedTokens }.
 - `summary.avoidable` — { excessContext, reducibleThinking, cacheRebuilds, total, share, band }: the computed grade anchor. The grader starts at band and must justify any deviation.
 - `byModel` / `byAgent` / `subagents` — cost split by model, by subagent task, and the subagent total.
 - `turns` (execution order) carry `kind` / `avgContext` / `peakContext`.
