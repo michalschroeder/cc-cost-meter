@@ -293,6 +293,13 @@ const minsBetween = (a, b) => {
   const t0 = Date.parse(a), t1 = Date.parse(b);
   return isNaN(t0) || isNaN(t1) ? null : (t1 - t0) / 60000;
 };
+// Local wall-clock HH:MM:SS of a step (report is rendered on the user's machine, so
+// local time is what they'd see in their terminal). Null when the call has no ts.
+const clockOf = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+};
 const fmtMins = (m) => {
   if (m == null) return '—';
   const r = Math.round(m);
@@ -357,12 +364,16 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
     const xv = xAt(i).toFixed(1);
     const step = i + 1; // main-session step ordinal (matches summary.mainSteps / thinking seq)
     const mins = t0 && c.ts ? minsBetween(t0, c.ts) : null;
+    const at = c.ts ? clockOf(c.ts) : null;
     const gapMin = i > 0 && t0 && c.ts && main[i - 1].ts ? minsBetween(main[i - 1].ts, c.ts) : null;
     // A real reset: the TOTAL window dropped. A cache REBUILD: the re-read part
     // collapsed but the total held — same split the data layer uses for contextResets
     // vs cacheRebuilds, so chart and cards agree.
-    if (i > 0 && prevTotal - total > resetDrop) {
-      parts.push(`<line x1="${xv}" y1="${padT}" x2="${xv}" y2="${baseY}" class="reset-line" stroke-dasharray="2 3"><title>context dropped ${esc(compactTokens(prevTotal))} → ${esc(compactTokens(total))} — a /compact or context clear</title></line>`);
+    // c.afterCompact: the data layer matched a compact_boundary record to this step —
+    // a reset even when the total drop is small (big post-compact window).
+    if (i > 0 && (prevTotal - total > resetDrop || c.afterCompact)) {
+      const why = c.afterCompact ? 'a /compact (re-cached the summarised window from scratch)' : 'a /compact or context clear';
+      parts.push(`<line x1="${xv}" y1="${padT}" x2="${xv}" y2="${baseY}" class="reset-line" stroke-dasharray="2 3"><title>context dropped ${esc(compactTokens(prevTotal))} → ${esc(compactTokens(total))} — ${why}</title></line>`);
     } else if (i > 0 && prevCached - cached > resetDrop) {
       parts.push(`<text x="${xv}" y="${(baseY + 19).toFixed(1)}" class="ctx-rebuild" text-anchor="middle">↻<title>cache rebuilt: ${esc(fmtMins(gapMin))} idle gap expired the prompt cache, so this step re-wrote the whole ${esc(compactTokens(total))} window (cost +${esc(money(c.cacheWriteCost || 0))}). Cache holds ~1h on a subscription, ~5min on API keys.</title></text>`);
     }
@@ -387,7 +398,8 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
     }
     const sourcesStr = srcLabels.join(' · ');
     const dataBase = ` data-step="${esc(step)}" data-cached="${esc(compactTokens(cached))}" data-written="${esc(compactTokens(written))}"` +
-      ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"`;
+      ` data-total="${esc(compactTokens(total))}" data-cost="${esc(money(c.cost))}" data-mins="${esc(fmtMins(mins))}"` +
+      (at ? ` data-at="${esc(at)}"` : '');
     const data = dataBase +
       (toolsStr ? ` data-tools="${esc(toolsStr)}"` : '') +
       (sourcesStr ? ` data-source="${esc(sourcesStr)}"` : '');
@@ -399,7 +411,7 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
     }
     const hCached = Math.max(baseY - yCached, 0.5);
     parts.push(`<rect class="ctx-bar ${tierClass(cached, highCtx, resetDrop)}" x="${xv}" y="${yCached.toFixed(1)}" width="${barW.toFixed(2)}" height="${hCached.toFixed(1)}"${data}>` +
-      `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · +${esc(fmtMins(mins))}` +
+      `<title>step ${esc(step)} · ${esc(compactTokens(total))} context (${esc(compactTokens(cached))} re-read + ${esc(compactTokens(written))} written) · ${esc(money(c.cost))} · ${at ? `${esc(at)} · ` : ''}+${esc(fmtMins(mins))} from start` +
       `${toolsStr ? ` — ran ${esc(toolsStr)}` : ''}${sourcesStr ? `; new in context: ${esc(sourcesStr)}` : ''}</title></rect>`);
     prevTotal = total; prevCached = cached;
   });

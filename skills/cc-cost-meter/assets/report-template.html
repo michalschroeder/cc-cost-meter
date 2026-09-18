@@ -622,13 +622,13 @@
       for (var i = 0; i < srcs.length; i++) lines += '<div class="tip-src">' + esc(srcs[i]) + '</div>';
       return '<div class="tip-h">Step ' + esc(d.step) + ' · ' + esc(d.total) + ' context</div>' +
         '<div class="tip-cost">' + esc(d.cost) + '</div>' +
-        '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · +' + esc(d.mins) + ' from start</div>' +
+        '<div class="tip-b">' + esc(d.cached) + ' re-read + ' + esc(d.written) + ' written · ' + (d.at ? esc(d.at) + ' · ' : '') + '+' + esc(d.mins) + ' from start</div>' +
         (d.tools ? '<div class="tip-b">ran: ' + esc(d.tools) + '</div>' : '') +
         (srcs.length ? '<div class="tip-b">new in context (+' + esc(d.written) + '):' + lines + '</div>' : '');
     },
     function (d) {
       return 'step ' + d.step + ' · ' + d.total + ' context (' + d.cached + ' re-read + ' + d.written +
-        ' written) · ' + d.cost + ' · +' + d.mins + ' from start' +
+        ' written) · ' + d.cost + ' · ' + (d.at ? d.at + ' · ' : '') + '+' + d.mins + ' from start' +
         (d.tools ? ' · ran: ' + d.tools : '') +
         (d.source ? ' · new in context: ' + d.source : '');
     });

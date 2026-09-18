@@ -526,6 +526,32 @@ test('smoke: avoidable counts cache rebuilds after an idle gap', async () => {
     (s.avoidable.excessContext + s.avoidable.reducibleThinking + s.avoidable.cacheRebuilds)) < 1e-12);
 });
 
+// The first step after a /compact re-caches the summarised window from scratch
+// (cacheRead collapses, cacheWrite ≈ new window). When the new window is big enough
+// that the TOTAL drop stays under RESET_DROP, the drop heuristic alone would call it
+// a cache rebuild. The compact_boundary record says it's a reset — trust it.
+test('smoke: step after compact_boundary is a reset, never a cache rebuild', async () => {
+  const cfg = mkProfile();
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(145000, 4, { cache_creation_input_tokens: 1700 })),
+    { type: 'system', subtype: 'compact_boundary', timestamp: '2024-06-01T10:03:00Z',
+      compactMetadata: { trigger: 'manual', preTokens: 147000, postTokens: 29000 } },
+    user('next', 'u2'),
+    step('m2', '2024-06-01T10:07:00Z', usage(0, 4, { cache_creation_input_tokens: 73000 })),
+    step('m3', '2024-06-01T10:07:10Z', usage(73000, 4, { cache_creation_input_tokens: 500 })),
+  ];
+  writeTranscript(cfg, 'compact001', entries, 1717200000);
+  const out = await runJson(['compact001'], cfg);
+  const s = out.summary;
+  assert.strictEqual(s.cacheRebuilds.count, 0);
+  assert.strictEqual(s.cacheRebuilds.extraCost, 0);
+  assert.strictEqual(s.avoidable.cacheRebuilds, 0);
+  assert.strictEqual(s.contextResets, 1);
+  const main = out.calls.filter((c) => c.isMain);
+  assert.deepStrictEqual(main.map((c) => !!c.afterCompact), [false, true, false]);
+});
+
 test('smoke: list rows carry the last recorded grade', async () => {
   const cfg = mkProfile();
   writeTranscript(cfg, 'graded01', fixture(), 1717200000);
