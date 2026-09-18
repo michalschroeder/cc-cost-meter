@@ -520,6 +520,10 @@ test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet 
   assert.match(html, /rebuild the prompt cache once/);  // headline names the count
   assert.match(html, /Prompt cache expired mid-session/); // assessment card prepended
   assert.match(html, /\+1h30m from start|1h30m/);       // minutes-from-start axis/label
+  // Each bar carries the step's wall-clock time (local, HH:MM:SS) for the hover readout.
+  const hhmmss = (iso) => { const d = new Date(iso); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
+  assert.match(html, new RegExp(`data-at="${hhmmss(ts(90))}"`));
+  assert.match(html, new RegExp(`<title>step 2 · [^<]*· ${hhmmss(ts(90))} · \\+1h30m`));
 
   // No rebuilds → no marker, no callout, no card.
   const clean = { ...detail, summary: { ...detail.summary, cacheRebuilds: { count: 0, extraCost: 0 } } };
@@ -527,6 +531,17 @@ test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet 
   assert.ok(!/class="ctx-rebuild"/.test(html2));
   assert.ok(!/callout callout-warn/.test(html2));
   assert.ok(!/Prompt cache expired mid-session/.test(html2));
+
+  // Step after a /compact whose total drop is under the reset threshold (147k → 73k):
+  // the data layer flags it afterCompact — draw the reset line, never the ↻ marker.
+  const compacted = [
+    { ...calls[0], tokens: { input: 0, cacheRead: 145000, cacheWrite: 1700, output: 100 } },
+    { ...calls[1], ts: ts(7), afterCompact: true, tokens: { input: 0, cacheRead: 0, cacheWrite: 73000, output: 100 } },
+    { ...calls[2], ts: ts(8), tokens: { input: 0, cacheRead: 73000, cacheWrite: 500, output: 100 } },
+  ];
+  const html3 = render({ ...clean, calls: compacted }, TEMPLATE);
+  assert.ok(!/class="ctx-rebuild"/.test(html3));
+  assert.match(html3, /class="reset-line"[^>]*><title>context dropped[^<]*\/compact/);
 });
 
 test('render: chart thresholds come from the payload, not hardcoded constants', () => {

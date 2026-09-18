@@ -795,12 +795,25 @@ function buildSummary(main, turns, compactions) {
   //    — the window was re-written into a fresh cache, not cleared.
   // Splitting on the total drop keeps the rebuild out of the reset count and bills its
   // extra cost as the cacheWrite spent re-caching what was already there.
+  // The first step after a /compact also collapses cacheRead (the summarised window is
+  // re-cached from scratch), and its total drop can stay under RESET_DROP when the
+  // post-compact window is big (CLAUDE.md, tool defs and skills are re-injected). The
+  // compact_boundary record is authoritative: flag that step afterCompact so it is a
+  // reset here and in the timeline, never a "cache expired" rebuild.
   const tot = main.map((c) => c.tokens.cacheRead + c.tokens.cacheWrite + c.tokens.input);
+  const compactTs = compactions.map((c) => Date.parse(c.ts)).filter((n) => !isNaN(n)).sort((a, b) => a - b);
+  let ci = 0;
+  for (let i = 1; i < main.length; i++) {
+    const a = Date.parse(main[i - 1].ts), b = Date.parse(main[i].ts);
+    if (isNaN(a) || isNaN(b)) continue;
+    while (ci < compactTs.length && compactTs[ci] <= a) ci++;
+    if (ci < compactTs.length && compactTs[ci] <= b) { main[i].afterCompact = true; ci++; }
+  }
   let resets = 0, rebuildCount = 0, rebuildExtraCost = 0;
   for (let i = 1; i < cr.length; i++) {
     const totalDropped = tot[i - 1] - tot[i] > RESET_DROP;
     const cacheCollapsed = cr[i - 1] - cr[i] > RESET_DROP;
-    if (totalDropped) resets++;
+    if (totalDropped || main[i].afterCompact) resets++;
     else if (cacheCollapsed) { rebuildCount++; rebuildExtraCost += main[i].cacheWriteCost || 0; }
   }
   const f = main.length ? main[0].tokens : null;
