@@ -421,8 +421,9 @@
   everything before it, <strong>taller bars cost more</strong>. The solid base is context
   <strong>re-read</strong> from cache, coloured green / amber / red by size; the hatched cap is new
   material <strong>written</strong> that step, normally thin. A cap that fills the whole bar means
-  the prompt cache expired after a long idle gap and the window was re-written from scratch (marked
-  ↻) — <em>not</em> the conversation shrinking. A dashed red line is the real thing: a /compact or
+  the window was re-written from scratch (marked ↻) — either the prompt cache expired after a long
+  idle gap, or it was still alive but the start of the prompt changed (a skill or slash command
+  loading, a tool or permission change) — <em>not</em> the conversation shrinking. A dashed red line is the real thing: a /compact or
   clear where the total dropped. The axis shows minutes from the start, so the long gaps are
   visible. Hover any bar for its split, cost, and the message it was working on.</p>
   {{CONTEXT_TIMELINE}}
@@ -432,7 +433,7 @@
     <span><i class="c-high"></i>re-read, above 200k (time to clear)</span>
     <span><i class="ctx-written"></i>written this step (new cache)</span>
     <span><i class="c-user"></i>where your message landed</span>
-    <span><i class="rebuild">↻</i>cache expired &amp; re-written (a long idle gap)</span>
+    <span><i class="rebuild">↻</i>cache re-written from scratch (expired after an idle gap, or the prompt prefix changed — hover for which)</span>
     <span><i class="reset"></i>conversation actually cleared (/compact or clear: the total dropped)</span>
   </div>
   <div id="ctx-readout">hover a bar to inspect a step</div>

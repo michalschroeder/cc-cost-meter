@@ -524,6 +524,43 @@ test('smoke: avoidable counts cache rebuilds after an idle gap', async () => {
   assert.strictEqual(s.avoidable.cacheRebuilds, s.cacheRebuilds.extraCost);
   assert.ok(Math.abs(s.avoidable.total -
     (s.avoidable.excessContext + s.avoidable.reducibleThinking + s.avoidable.cacheRebuilds)) < 1e-12);
+  // Legacy cache_creation total (no TTL split) reads as the 5m bucket; a 90-min gap ≥ 5m → expired.
+  assert.strictEqual(s.cacheRebuilds.expired, 1);
+  assert.strictEqual(s.cacheRebuilds.invalidated, 0);
+  const m2 = out.calls.filter((c) => c.isMain)[1];
+  assert.strictEqual(m2.cacheTtl, '5m');
+  assert.strictEqual(m2.cacheRebuild.cause, 'expired');
+  assert.strictEqual(m2.cacheRebuild.gapMs, 90 * 60 * 1000);
+});
+
+// A rebuild only 2.5 min after the previous step, with the writes in the 1h bucket: the
+// cache had NOT expired — the prompt prefix changed (a skill loaded, tools/permissions
+// changed). Same cost, different cause and advice: it's 'invalidated', not 'expired'.
+test('smoke: rebuild inside the cache TTL is a prefix invalidation, not an expiry', async () => {
+  const cfg = mkProfile();
+  const oneHour = (n) => ({ cache_creation_input_tokens: n,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: n } });
+  const entries = [
+    user('go', 'u1'),
+    step('m1', '2024-06-01T10:00:00Z', usage(236000, 4, oneHour(1100))),
+    user('/some-skill', 'u2'),
+    step('m2', '2024-06-01T10:02:30Z', usage(13700, 4, oneHour(231000))),
+    step('m3', '2024-06-01T10:02:45Z', usage(245000, 4, oneHour(2500))),
+  ];
+  writeTranscript(cfg, 'inval001', entries, 1717200000);
+  const out = await runJson(['inval001'], cfg);
+  const s = out.summary;
+  assert.strictEqual(s.cacheRebuilds.count, 1);
+  assert.strictEqual(s.cacheRebuilds.expired, 0);
+  assert.strictEqual(s.cacheRebuilds.invalidated, 1);
+  assert.ok(s.cacheRebuilds.extraCost > 0);
+  assert.strictEqual(s.contextResets, 0);
+  const main = out.calls.filter((c) => c.isMain);
+  assert.deepStrictEqual(main.map((c) => c.cacheTtl), ['1h', '1h', '1h']);
+  assert.strictEqual(main[0].cacheRebuild, undefined);
+  assert.deepStrictEqual(main[1].cacheRebuild,
+    { cause: 'invalidated', gapMs: 150 * 1000, ttlMs: 60 * 60 * 1000, survivedTokens: 13700 });
+  assert.strictEqual(main[2].cacheRebuild, undefined);
 });
 
 // The first step after a /compact re-caches the summarised window from scratch

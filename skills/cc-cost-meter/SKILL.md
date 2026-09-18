@@ -146,7 +146,7 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
      | 3 | grader | `opus` | `${CLAUDE_SKILL_DIR}/references/grader-prompt.md` | `{{EVALUATION_MD_PATH}}`, `{{GRADER_JSON_PATH}}` (= `$W/grader.json`), `{{SUMMARIES_JSON_PATH}}` | `{ rating, anchorNote, headline, cards }` |
      | 4 | critic | `opus` | `${CLAUDE_SKILL_DIR}/references/critic-prompt.md` | same three paths + `{{DRAFT_JSON}}` = subagent 3's output | final `{ rating, anchorNote, headline, cards }` |
 
-     The renderer already prepends its own deterministic "Prompt cache expired mid-session" card
+     The renderer already prepends its own deterministic "Prompt cache expired / invalidated mid-session" card
      whenever `summary.cacheRebuilds.count > 0` — the grader and critic prompts say not to write a
      second one, so don't re-add it when merging.
 

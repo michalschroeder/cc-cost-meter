@@ -544,6 +544,39 @@ test('render: cache rebuild → ↻ marker, callout, and assessment card; quiet 
   assert.match(html3, /class="reset-line"[^>]*><title>context dropped[^<]*\/compact/);
 });
 
+test('render: a rebuild inside the TTL is worded as a prefix invalidation, not an expiry', () => {
+  const ts = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
+  const calls = [
+    { seq: 1, agent: 'main', isMain: true, cost: 0.4, prompt: 'p1', turnIndex: 1, ts: ts(0),
+      tokens: { input: 0, cacheRead: 236000, cacheWrite: 1100, output: 100 }, cacheTtl: '1h' },
+    { seq: 2, agent: 'main', isMain: true, cost: 2.0, prompt: '/some-skill', turnIndex: 2, ts: ts(2),
+      tokens: { input: 0, cacheRead: 13700, cacheWrite: 231000, output: 100 }, cacheWriteCost: 1.9, cacheTtl: '1h',
+      cacheRebuild: { cause: 'invalidated', gapMs: 120000, ttlMs: 3600000, survivedTokens: 13700 } },
+    { seq: 3, agent: 'main', isMain: true, cost: 0.4, prompt: 'p3', turnIndex: 3, ts: ts(3),
+      tokens: { input: 0, cacheRead: 245000, cacheWrite: 2500, output: 100 }, cacheTtl: '1h' },
+  ];
+  const d = { ...detail, calls,
+    summary: { ...detail.summary, cacheRebuilds: { count: 1, extraCost: 1.9, expired: 0, invalidated: 1 }, aiAssessment: undefined } };
+  const html = render(d, TEMPLATE);
+  assert.match(html, /class="ctx-rebuild"/);
+  // ↻ tooltip: names the short gap and the survived prefix, never "expired".
+  assert.match(html, /cache rebuilt: only 2m since the previous step[^<]*first 14k still hit/);
+  assert.ok(!/idle gap expired the prompt cache/.test(html));
+  // Callout + card: invalidation wording; the expiry headline/card must not appear.
+  assert.match(html, /re-written once without expiring/);
+  assert.match(html, /Prompt cache invalidated mid-session/);
+  assert.ok(!/Session ran long enough/.test(html));
+  assert.ok(!/Prompt cache expired mid-session/.test(html));
+
+  // Mixed: one expired + one invalidated → expiry headline counts only the expired ones,
+  // and the prose mentions the other.
+  const mixed = { ...d, summary: { ...d.summary, cacheRebuilds: { count: 2, extraCost: 3.8, expired: 1, invalidated: 1 } } };
+  const html2 = render(mixed, TEMPLATE);
+  assert.match(html2, /rebuild the prompt cache once/);
+  assert.match(html2, /The other once the cache had not expired/);
+  assert.match(html2, /Prompt cache expired mid-session/);
+});
+
 test('render: chart thresholds come from the payload, not hardcoded constants', () => {
   const moved = {
     ...detail,

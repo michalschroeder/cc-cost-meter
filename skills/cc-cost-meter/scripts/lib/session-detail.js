@@ -431,6 +431,10 @@ function buildDetail(mainFile, subagentFiles, pricing) {
         turnIndex: d.isMain ? call.turn : null,      // which main-session turn this call served
         cost: b.total, outCost: b.output, cacheReadCost: b.cacheRead, cacheWriteCost: b.cacheWrite,
         tokens, tools: call.tools.slice(),
+        // Which cache TTL this step's writes went into — the 1h bucket on a subscription,
+        // 5m on API keys. null when nothing was written. buildSummary uses it to tell an
+        // expired cache (idle gap ≥ TTL) from a prefix invalidation (gap < TTL).
+        cacheTtl: tokens.cacheWrite > 0 ? (cc.oneHour > 0 ? '1h' : '5m') : null,
         outParts: call.outParts,
       });
       if (d.isMain) {
@@ -746,6 +750,9 @@ const RESET_DROP = 100000;
 // phase boundary where a /compact would have been cheap (and, past the cache TTL,
 // the cause of a cache rebuild).
 const IDLE_GAP_MS = 5 * 60 * 1000;
+// Prompt-cache TTLs: the 1h bucket (Claude subscription) and the 5m bucket (API keys).
+const CACHE_TTL_1H_MS = 60 * 60 * 1000;
+const CACHE_TTL_5M_MS = 5 * 60 * 1000;
 
 // Derived, analysis-ready rollups so a consumer doesn't hand-roll them (and can't
 // cherry-pick a single early call as "the start" or mis-tally tools):
@@ -809,12 +816,29 @@ function buildSummary(main, turns, compactions) {
     while (ci < compactTs.length && compactTs[ci] <= a) ci++;
     if (ci < compactTs.length && compactTs[ci] <= b) { main[i].afterCompact = true; ci++; }
   }
-  let resets = 0, rebuildCount = 0, rebuildExtraCost = 0;
+  // A rebuild has two causes that look identical in the token curve:
+  //  - EXPIRED: the idle gap before the step is ≥ the cache TTL (1h subscription, 5m API
+  //    key — read off the step's own cache_creation bucket), so the cache was simply gone;
+  //  - INVALIDATED: the gap is shorter than the TTL, so the cache was alive but the prompt
+  //    PREFIX changed near the top (system prompt / tool defs / permissions — e.g. a skill
+  //    or slash command loading, a tool set change, a rejected tool use). Only the bytes
+  //    before the change still hit (cacheRead shows how much survived); everything after
+  //    is re-written. A /compact would not have avoided this; the advice differs.
+  let resets = 0, rebuildCount = 0, rebuildExtraCost = 0, rebuildExpired = 0, rebuildInvalidated = 0;
   for (let i = 1; i < cr.length; i++) {
     const totalDropped = tot[i - 1] - tot[i] > RESET_DROP;
     const cacheCollapsed = cr[i - 1] - cr[i] > RESET_DROP;
     if (totalDropped || main[i].afterCompact) resets++;
-    else if (cacheCollapsed) { rebuildCount++; rebuildExtraCost += main[i].cacheWriteCost || 0; }
+    else if (cacheCollapsed) {
+      rebuildCount++; rebuildExtraCost += main[i].cacheWriteCost || 0;
+      const a = Date.parse(main[i - 1].ts), b = Date.parse(main[i].ts);
+      const gapMs = isNaN(a) || isNaN(b) ? null : b - a;
+      const ttlMs = main[i].cacheTtl === '1h' ? CACHE_TTL_1H_MS : CACHE_TTL_5M_MS;
+      // Unknown gap (missing timestamps) → assume expired, the pre-existing reading.
+      const cause = gapMs == null || gapMs >= ttlMs ? 'expired' : 'invalidated';
+      if (cause === 'expired') rebuildExpired++; else rebuildInvalidated++;
+      main[i].cacheRebuild = { cause, gapMs, ttlMs, survivedTokens: cr[i] };
+    }
   }
   const f = main.length ? main[0].tokens : null;
   // Prefer the authoritative compact_boundary records; fall back to the drop
@@ -868,10 +892,11 @@ function buildSummary(main, turns, compactions) {
     })),
     manualCompacts,
     autoCompacts,
-    // Prompt cache expiring then being re-written (long idle gap > cache TTL: ~1h on a
-    // Claude subscription, ~5min on API keys). count = how many steps re-cached the
-    // whole window; extraCost = the cacheWrite $ that bought nothing new.
-    cacheRebuilds: { count: rebuildCount, extraCost: rebuildExtraCost },
+    // Prompt cache re-written from scratch. count = how many steps re-cached the whole
+    // window; extraCost = the cacheWrite $ that bought nothing new. expired = the idle
+    // gap outlived the TTL (~1h subscription, ~5min API keys); invalidated = the cache was
+    // alive but the prompt prefix changed (see the loop above). Per step: calls[].cacheRebuild.
+    cacheRebuilds: { count: rebuildCount, extraCost: rebuildExtraCost, expired: rebuildExpired, invalidated: rebuildInvalidated },
     stepShape, modelSwitches: { count: switches, models }, idleGaps,
   };
 }

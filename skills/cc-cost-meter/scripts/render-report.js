@@ -375,7 +375,13 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
       const why = c.afterCompact ? 'a /compact (re-cached the summarised window from scratch)' : 'a /compact or context clear';
       parts.push(`<line x1="${xv}" y1="${padT}" x2="${xv}" y2="${baseY}" class="reset-line" stroke-dasharray="2 3"><title>context dropped ${esc(compactTokens(prevTotal))} → ${esc(compactTokens(total))} — ${why}</title></line>`);
     } else if (i > 0 && prevCached - cached > resetDrop) {
-      parts.push(`<text x="${xv}" y="${(baseY + 19).toFixed(1)}" class="ctx-rebuild" text-anchor="middle">↻<title>cache rebuilt: ${esc(fmtMins(gapMin))} idle gap expired the prompt cache, so this step re-wrote the whole ${esc(compactTokens(total))} window (cost +${esc(money(c.cacheWriteCost || 0))}). Cache holds ~1h on a subscription, ~5min on API keys.</title></text>`);
+      // c.cacheRebuild.cause (data layer): 'expired' = idle gap ≥ TTL; 'invalidated' = cache
+      // was alive but the prompt prefix changed. Missing flag (older detail) reads as expired.
+      const rb = c.cacheRebuild || {};
+      const why = rb.cause === 'invalidated'
+        ? `only ${esc(fmtMins(gapMin))} since the previous step — the cache had not expired; something near the top of the prompt changed (system prompt, tool set or permissions — e.g. a skill or slash command loading), so only the first ${esc(compactTokens(cached))} still hit and this step re-wrote the rest of the ${esc(compactTokens(total))} window (cost +${esc(money(c.cacheWriteCost || 0))}).`
+        : `${esc(fmtMins(gapMin))} idle gap expired the prompt cache, so this step re-wrote the whole ${esc(compactTokens(total))} window (cost +${esc(money(c.cacheWriteCost || 0))}). Cache holds ~1h on a subscription, ~5min on API keys.`;
+      parts.push(`<text x="${xv}" y="${(baseY + 19).toFixed(1)}" class="ctx-rebuild" text-anchor="middle">↻<title>cache rebuilt: ${why}</title></text>`);
     }
     if (c.prompt && c.turnIndex !== prevTurn) {
       const tick = kindOf.get(c.turnIndex) === 'user' ? 'c-user' : 'c-dim';
@@ -432,20 +438,50 @@ function contextTimeline(calls, turns, highCtx = HIGH_CONTEXT, resetDrop = RESET
 // "once" / "N times" — how many cache rebuilds, in prose (shared by the callout and card).
 const rebuildTimes = (n) => (n === 1 ? 'once' : `${n} times`);
 
-// Standalone warning card rendered under the chart when the prompt cache expired and was
-// rebuilt at least once. Deterministic (computed from summary.cacheRebuilds), so it's
-// always present when the data shows it, independent of the AI assessment.
+// Split a summary.cacheRebuilds into its two causes. Older summaries (no split) count as
+// all expired — the reading the report gave before the split existed.
+function rebuildCauses(cr) {
+  const count = cr.count || 0;
+  const invalidated = Number.isFinite(cr.invalidated) ? cr.invalidated : 0;
+  const expired = Number.isFinite(cr.expired) ? cr.expired : count - invalidated;
+  return { count, expired, invalidated };
+}
+
+// Standalone warning card rendered under the chart when the prompt cache was re-written
+// from scratch at least once. Deterministic (computed from summary.cacheRebuilds), so it's
+// always present when the data shows it, independent of the AI assessment. Wording follows
+// the cause: an idle gap that outlived the TTL vs. a prompt-prefix change mid-session.
 function cacheRebuildCallout(summary) {
   const cr = (summary && summary.cacheRebuilds) || {};
   if (!cr.count) return '';
+  const { count, expired, invalidated } = rebuildCauses(cr);
+  const cost = `<strong>${esc(money(cr.extraCost))}</strong>`;
+  if (!expired) {
+    return `<div class="callout callout-warn">
+    <div class="callout-h">⚠ Prompt cache re-written ${esc(rebuildTimes(count))} without expiring</div>
+    <p>The prompt cache holds the conversation so each step re-reads it cheaply. It only works while
+    the start of the prompt is byte-identical to the last request. ${esc(rebuildTimes(count)).replace(/^./, (m) => m.toUpperCase())}
+    the cache was still alive (well inside its TTL) but something near the top changed — the system
+    prompt, the tool set or permissions, typically when a <strong>skill or slash command loads</strong>,
+    a tool becomes available, or a tool use is rejected — so the next step re-wrote almost the whole
+    window. That cost roughly ${cost} here and bought nothing new. Those are the ↻ marks on the chart;
+    hover one to see how much of the prefix survived. /compact would not have avoided it: invoke
+    skills and slash commands <strong>early, while the context is still small</strong>, and avoid
+    changing tools or permissions late in a big session.</p>
+  </div>`;
+  }
+  const mixed = invalidated
+    ? ` The other ${esc(rebuildTimes(invalidated))} the cache had not expired — the prompt prefix changed
+    (a skill or slash command loading, a tool set or permission change) — which /compact would not have
+    avoided; invoke those early, while the context is still small.` : '';
   return `<div class="callout callout-warn">
-    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache ${esc(rebuildTimes(cr.count))}</div>
+    <div class="callout-h">⚠ Session ran long enough to rebuild the prompt cache ${esc(rebuildTimes(expired))}</div>
     <p>The prompt cache holds the conversation so each step re-reads it cheaply. It expires after
     an idle gap — about <strong>1 hour on a Claude subscription</strong> (5 minutes on API-key usage).
     When that happens the next step has to re-write the whole window from scratch, which cost roughly
-    <strong>${esc(money(cr.extraCost))}</strong> here and bought nothing new. Those are the ↻ marks on
+    ${cost} here across ${esc(rebuildTimes(count))} and bought nothing new. Those are the ↻ marks on
     the chart. To avoid it: <strong>/compact or /clear at a natural break</strong> before stepping away,
-    or split a very long session into shorter ones.</p>
+    or split a very long session into shorter ones.${mixed}</p>
   </div>`;
 }
 
@@ -568,15 +604,34 @@ function buildAssessment(detail) {
   // always names the long-session-cache-expiry cost, regardless of what the AI wrote.
   const cr = s.cacheRebuilds || {};
   if (cr.count) {
-    cards.unshift({
-      verdict: 'warn',
-      title: 'Prompt cache expired mid-session',
-      what: `The session was idle long enough that the prompt cache expired and had to be re-written ` +
-        `${rebuildTimes(cr.count)}, costing about ${money(cr.extraCost)} extra.`,
-      why: 'The cache lets every step re-read the conversation cheaply. After an idle gap (~1h on a ' +
-        'Claude subscription, ~5min on API keys) it expires, and the next step pays to re-cache the whole window.',
-      how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
-    });
+    const { count, expired, invalidated } = rebuildCauses(cr);
+    if (!expired) {
+      cards.unshift({
+        verdict: 'warn',
+        title: 'Prompt cache invalidated mid-session',
+        what: `The prompt cache was re-written from scratch ${rebuildTimes(count)} while still inside its TTL, ` +
+          `costing about ${money(cr.extraCost)} extra.`,
+        why: 'The cache only hits while the start of the prompt is unchanged. A skill or slash command loading, ' +
+          'a tool set or permission change, or a rejected tool use alters the prefix, and the next step pays to ' +
+          're-cache everything after it.',
+        how: 'Invoke skills and slash commands early, while the context is small; avoid changing tools or ' +
+          'permissions late in a big session. /compact does not prevent this.',
+      });
+    } else {
+      const mixed = invalidated
+        ? ` The other ${rebuildTimes(invalidated)} the prefix changed mid-session (a skill or slash command loading, ` +
+          'a tool or permission change), which /compact would not have avoided.' : '';
+      cards.unshift({
+        verdict: 'warn',
+        title: 'Prompt cache expired mid-session',
+        what: `The session was idle long enough that the prompt cache expired and had to be re-written ` +
+          `${rebuildTimes(expired)}, costing about ${money(cr.extraCost)} extra` +
+          (invalidated ? ` across ${rebuildTimes(count)}.` : '.') + mixed,
+        why: 'The cache lets every step re-read the conversation cheaply. After an idle gap (~1h on a ' +
+          'Claude subscription, ~5min on API keys) it expires, and the next step pays to re-cache the whole window.',
+        how: '/compact or /clear at a natural break before stepping away, or split a very long session into shorter ones.',
+      });
+    }
   }
   const av = s.avoidable;
   const anchor = av && av.band != null && Number.isFinite(Number(av.band))
