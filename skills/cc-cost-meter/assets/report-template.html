@@ -9,7 +9,7 @@
     TOTAL_COST       totalCost, formatted "$0.00"
     STEP_COUNT       steps
     DURATION         summary.durationMs → "Xh Ym"
-    HIGH_CTX_COST    summary.highContextCost.cost → "$0.00" (what /compact would save)
+    HIGH_CTX_COST    summary.highContextCost.cost → "$0.00" (spend on calls above 200k — a size symptom, NOT a saving; summary.compactionWhatIf holds what compaction was worth)
     HIGH_CTX_CALLS   summary.highContextCost.calls
     CONTEXT_RESETS   summary.contextResets
     PEAK_CONTEXT     summary.contextGrowth.peakContext → "Nk"
@@ -389,7 +389,7 @@
     </div>
     <div class="card tint-salmon">
       <div class="ctitle">Spent above 200k</div>
-      <div class="cbody"><div class="v">{{HIGH_CTX_COST}}</div><div class="k">{{HIGH_CTX_CALLS}} calls · {{CONTEXT_RESETS}} resets — what /compact would cut</div></div>
+      <div class="cbody"><div class="v">{{HIGH_CTX_COST}}</div><div class="k">{{HIGH_CTX_CALLS}} calls · {{CONTEXT_RESETS}} resets — spend while the window was huge</div></div>
     </div>
   </div>
 

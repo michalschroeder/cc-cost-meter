@@ -20,18 +20,18 @@ use the transcript-derived turn labels only to explain them. Field → what it d
 | Field | Decides | Rule |
 |---|---|---|
 | `summary.avoidable.band`, `.share` | the grade's starting point | rating = band ± 1; deviation needs an `anchorNote` |
-| `summary.compactionWhatIf.best` | the top lever card | not null → card "compact after turn N" with `estSaving`; null → don't recommend compaction as the main fix |
+| `summary.compactionWhatIf.best` | the top lever card | not null **and** `estSaving` ≥ 2% of `totalCost` (or ≥ $0.10) → card "compact after turn N" with `estSaving`; below that, or null → don't recommend compaction as the main fix |
 | `summary.compactionWhatIf.policy` | how much a compact-when-large habit was worth | `estSaving` is the `excessContext` slice of `avoidable` |
 | `summary.assistantOutput.thinking.stepSource` | whether thinking counts are exact | `thinking-blocks` = exact per-step; `residual-heuristic` = upper estimate, hedge every thinking claim |
 | `thinking.stepsWithThinking / mainSteps` | "reasoning on most steps" | only when > 0.8 AND stepSource = thinking-blocks |
 | `summary.stepShape.parallelSteps`, `.stepsWithTools` | batching | parallelSteps / stepsWithTools < 0.1 on ≥ 20 tool steps = unbatched |
 | `summary.modelSwitches.count` | cache busts | each switch = one full re-write; > 0 is a "warn", ≥ 3 a "bad" |
 | `byModel` cost split plus session-wide `summary.toolTally` | model routing | Opus with `toolTally` dominated by Bash/Read/Edit = mechanical work on the priciest model |
-| `summary.idleGaps`, `summary.cacheRebuilds` | idle cost | rebuild `extraCost` > 5% of bill = "bad" |
+| `summary.idleGaps`, `summary.cacheRebuilds` | idle cost | rebuild `extraCost` > 5% of bill = "bad". The report adds its own cache-expiry card — never write a second one |
 | `summary.compactions[].trigger` | manual vs auto | ground truth; empty = unknown, say nothing |
 | `summary.bySkill` | review-on-implementation | `code-review` / `simplify` / `security-review` in a session that also edited files |
 | `subagents.total / totalCost` | delegation | < 5% on a session with big tool results = nothing offloaded |
-| turn `kind` counts (summaries.json) | spiral / kitchen-sink | ≥ 3 `correction` = spiral; ≥ 3 `new-task` with 0 resets = kitchen-sink |
+| turn `kind` counts (summaries.json; null kind = not a user turn, skip it) | spiral / kitchen-sink | ≥ 3 `correction` = spiral; ≥ 3 `new-task` with 0 resets = kitchen-sink |
 | `summary.contextConsumers.top` incl. synthetic rows | what filled the window | name the top rows whatever their tool; an `unexplained` row is stated as such |
 
 ---

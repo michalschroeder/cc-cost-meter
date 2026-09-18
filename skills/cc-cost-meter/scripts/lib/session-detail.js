@@ -26,6 +26,9 @@ function promptText(o) {
   if (text == null) return null;
   const cmd = /<command-name>([^<]*)<\/command-name>/.exec(text);
   if (cmd) text = cmd[1];
+  // A local command's echoed stdout arrives as its own `user` entry — machine
+  // output, not a prompt, so it must not open a turn.
+  else if (/<local-command-(stdout|stderr)>/.test(text)) return null;
   text = text.replace(/\s+/g, ' ').trim();
   return text || null;
 }
@@ -213,16 +216,31 @@ function parseCalls(file, trackPrompts, consumers, turnOffset) {
   return out;
 }
 
+// Claude Code's own slash commands. They look exactly like a skill dispatch but
+// drive no user work, so they get their own kind and stay out of `bySkill`.
+const BUILTIN_COMMANDS = new Set([
+  'compact', 'clear', 'model', 'config', 'cost', 'context', 'help', 'init', 'login', 'logout',
+  'resume', 'review', 'status', 'exit', 'quit', 'doctor', 'memory', 'vim', 'agents', 'mcp',
+  'permissions', 'hooks', 'export', 'fast', 'effort', 'usage', 'upgrade', 'privacy-settings',
+  'release-notes', 'bug', 'feedback', 'terminal-setup', 'add-dir', 'rewind', 'todos', 'artifacts',
+]);
+
 // Coarse class of a main-session turn, for attributing cost to *kinds* of work.
 // 'subagent-orchestration' = a parent turn handling a subagent return (the parent
 // re-caches its whole context → a cacheWrite spike); 'skill' = a skill/slash
-// dispatch; 'session-start' = pre-prompt calls; else 'user'.
+// dispatch; 'command' = a built-in slash command; 'session-start' = pre-prompt
+// calls; else 'user'.
 function turnKind(text) {
   if (!text) return 'other';
   if (text.startsWith('<task-notification>')) return 'subagent-orchestration';
-  // Slash command = /name, one token, no inner slashes — not an absolute path like /home/….
-  if (text.startsWith('Base directory for this skill:') || /^\/[A-Za-z0-9_:-]+(\s|$)/.test(text)) return 'skill';
   if (text === '(session start)') return 'session-start';
+  if (text.startsWith('Base directory for this skill:')) return 'skill';
+  // Slash command = /name, one token, no inner slashes — not an absolute path like
+  // /home/…, and not a sentence that merely opens with one ("/etc is broken").
+  const slash = /^\/([A-Za-z0-9_:-]+)(\s|$)/.exec(text);
+  if (slash && (text.length === slash[0].length || !/^\/(etc|usr|var|home|tmp|opt|srv|bin|sbin|dev|proc|sys|root|mnt|media|boot|lib)$/.test('/' + slash[1]))) {
+    return BUILTIN_COMMANDS.has(slash[1].toLowerCase()) ? 'command' : 'skill';
+  }
   return 'user';
 }
 
@@ -845,4 +863,4 @@ function buildSummary(main, turns, compactions) {
   };
 }
 
-module.exports = { promptText, parseCalls, buildDetail };
+module.exports = { promptText, turnKind, parseCalls, buildDetail };

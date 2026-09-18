@@ -50,24 +50,15 @@ function parseFileCalls(file, pricing) {
 // Aggregate all transcripts under configDir's projects/* (main session files
 // AND nested <session>/subagents/agent-*.jsonl, attributed to the parent). Returns
 // { perSession: {id:{days,total}}, byDay: {key:cost}, files: {path:{...,calls}}, pricingHash }.
-// Incremental: a file whose mtime+size match the prior cache (and pricingHash
-// matches) reuses its cached `calls`. Global dedup (first occurrence wins) runs
-// files mtime-ascending and is rebuilt fresh each call from the per-file lists.
-// NOTE on sinceMtimeMs: it excludes files older than the bound for performance.
-// A file's calls are always dated ≤ its mtime, so excluded files only hold
-// out-of-window calls. Per-day buckets WITHIN the window are therefore correct,
-// but per-session TOTALS are only complete in a full run (no sinceMtimeMs). The
-// renderer uses only windowed day-sums; the viewer runs full history.
-function aggregate(configDir, pricing, opts = {}) {
-  const { sinceMtimeMs = 0, cache = null } = opts;
+// Every file is parsed on each call (one full pass over the transcript tree);
+// global dedup (first occurrence wins) runs files mtime-ascending.
+function aggregate(configDir, pricing) {
   const root = configDir || path.join(os.homedir(), '.claude');
-  const prevFiles = (cache && cache.pricingHash === pricing.pricingHash && cache.files) || {};
 
   const candidates = [];
   const addCandidate = (file, sessionId) => {
     if (!sessionId) return;
     let st; try { st = fs.statSync(file); } catch { return; }
-    if (st.mtimeMs < sinceMtimeMs) return;
     candidates.push({ file, sessionId, mtime: st.mtimeMs, size: st.size });
   };
   for (const d of projectDirs(root)) {
@@ -100,10 +91,7 @@ function aggregate(configDir, pricing, opts = {}) {
   const byDay = {};
   const seen = new Set();
   for (const c of candidates) {
-    const prev = prevFiles[c.file];
-    const calls = (prev && prev.mtime === c.mtime && prev.size === c.size)
-      ? prev.calls
-      : parseFileCalls(c.file, pricing);
+    const calls = parseFileCalls(c.file, pricing);
     files[c.file] = { mtime: c.mtime, size: c.size, sessionId: c.sessionId, calls };
     const ps = perSession[c.sessionId] || (perSession[c.sessionId] = { days: {}, total: 0 });
     for (const call of calls) {
@@ -116,39 +104,4 @@ function aggregate(configDir, pricing, opts = {}) {
   return { perSession, byDay, files, pricingHash: pricing.pricingHash };
 }
 
-// Read <stateDir>/cost-cache.json → parsed object or null. The full cache carries
-// the bulky per-file `calls` blob (the incremental-rebuild scratch state); use
-// readSummary on the render hot path instead.
-function readCache(stateDir) {
-  try { return JSON.parse(fs.readFileSync(path.join(stateDir, 'cost-cache.json'), 'utf8')); }
-  catch { return null; }
-}
-
-// Slim renderer-facing summary: {pricingHash, perSession} only — no `files` blob,
-// so the hot path parses kilobytes, not megabytes. Falls back to the full cache
-// for back-compat (older caches / before the first refresh writes the summary).
-function readSummary(stateDir) {
-  try { return JSON.parse(fs.readFileSync(path.join(stateDir, 'cost-summary.json'), 'utf8')); }
-  catch {}
-  return readCache(stateDir);
-}
-
-function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj));
-  fs.renameSync(tmp, file);
-}
-
-// Atomically write the full incremental cache ({pricingHash, files, perSession})
-// plus the slim renderer summary ({pricingHash, perSession}).
-function writeCache(stateDir, result) {
-  try {
-    fs.mkdirSync(stateDir, { recursive: true });
-    writeJsonAtomic(path.join(stateDir, 'cost-cache.json'),
-      { pricingHash: result.pricingHash, files: result.files, perSession: result.perSession });
-    writeJsonAtomic(path.join(stateDir, 'cost-summary.json'),
-      { pricingHash: result.pricingHash, perSession: result.perSession });
-  } catch {}
-}
-
-module.exports = { dayKey, parseFileCalls, aggregate, readCache, readSummary, writeCache };
+module.exports = { dayKey, parseFileCalls, aggregate };

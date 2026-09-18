@@ -9,7 +9,7 @@ description: >-
   [--config-dir <path>] [--out <path>] [--last N] [--since YYYY-MM-DD]`. Examples:
   `/cc-cost-meter 848c5b25`,
   `/cc-cost-meter list --last 20 --config-dir ~/.claude-lendable`.
-argument-hint: "[<session-id-prefix> | list] [--config-dir <path>] [--out <path>] [--last N] [--since YYYY-MM-DD]"
+argument-hint: "[<session-id-prefix> | list] [--config-dir <path>] [--out <path>] [--no-assess] [--last N] [--since YYYY-MM-DD]"
 ---
 
 # cc-cost-meter
@@ -68,10 +68,14 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
      inline (`title · $cost · age`, or `title · $cost · grade N/5 · age` when a row has a recorded
      grade), and ask which one to analyze.
 
-2. **Pull the detail.** Run
-   `node ${CLAUDE_SKILL_DIR}/scripts/analyze.js <prefix> > /tmp/detail.json` once, then read
+2. **Pull the detail.** Make a private per-run work dir first (two concurrent runs must not
+   overwrite each other, and these files hold full prompts):
+   `W=$(mktemp -d -t cc-cost-meter-XXXXXX)`. Then run
+   `node ${CLAUDE_SKILL_DIR}/scripts/analyze.js <prefix> > $W/detail.json` once, then read
    and parse that file. Step 5 reuses it — don't re-run `analyze.js` (each run re-parses the
    whole transcript tree). Read the `legend` field first — it states the cost model.
+   Every `$W/...` path below is that same dir; keep the shell variable for the whole run
+   (or substitute the absolute path).
 
 3. **Read the precomputed rollups, do NOT hand-aggregate `calls[]`.**
    Use `summary.contextGrowth`, `summary.byTurnKind`, `summary.toolTally`,
@@ -104,7 +108,7 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
      <one sentence: where the money went — the dominant token type / driver>
 
      **Cost split**
-     - Token type: cache-read $X (Y%) · cache-write $X (Y%) · output $X (Y%) · input $X (Y%)
+     - Token type: cache-read $X (Y%) · cache-write $X (Y%) · output $X (Y%) · input $X (Y%)   <!-- append ` · web $X (Y%)` when components.web > 0 -->
      - Main vs subagents: main $X (Y%) · subagents $X (Y%)
 
      **What filled the context** (of ~<peakContext> peak)
@@ -132,30 +136,39 @@ session. (`list` mode produces no detail, so step 5 doesn't apply there.) Unknow
 
      ```bash
      # 1. Trim the payload for the subagents (never hand them detail.json — calls[] alone is ~400 KB):
-     node ${CLAUDE_SKILL_DIR}/scripts/grader-view.js < /tmp/detail.json > /tmp/grader.json
+     node ${CLAUDE_SKILL_DIR}/scripts/grader-view.js < $W/detail.json > $W/grader.json
      ```
 
      | # | Subagent | Model | Prompt file | Slots | Returns |
      |---|---|---|---|---|---|
-     | 1 | turns | `haiku` | `${CLAUDE_SKILL_DIR}/references/turns-prompt.md` | `{{TURNS_JSON}}` = ALL `turns` from `/tmp/grader.json` as `[{turnIndex, kind, tools, prompt}]` | `{ "<turnIndex>": { summary, kind } }` |
+     | 1 | turns | `haiku` | `${CLAUDE_SKILL_DIR}/references/turns-prompt.md` | `{{TURNS_JSON}}` = every `turns` row from `$W/grader.json` **except** `kind: "session-start"` (turn 0 has no prompt), as `[{turnIndex, kind, tools, prompt}]` | `{ "<turnIndex>": { summary, kind } }` (`kind` null on non-`user` turns) |
      | 2 | consumers | `haiku` | `${CLAUDE_SKILL_DIR}/references/consumers-prompt.md` | `{{CONSUMERS_JSON}}` = `summary.contextConsumers.top` rows with `synthetic` **not** true, as `[{index, tool, target}]` (index = position in `top`) | `{ "<index>": "<phrase>" }` |
-     | 3 | grader | `opus` | `${CLAUDE_SKILL_DIR}/references/grader-prompt.md` | `{{EVALUATION_MD_PATH}}`, `{{GRADER_JSON_PATH}}` (= `/tmp/grader.json`), `{{SUMMARIES_JSON_PATH}}` | `{ rating, anchorNote, headline, cards }` |
+     | 3 | grader | `opus` | `${CLAUDE_SKILL_DIR}/references/grader-prompt.md` | `{{EVALUATION_MD_PATH}}`, `{{GRADER_JSON_PATH}}` (= `$W/grader.json`), `{{SUMMARIES_JSON_PATH}}` | `{ rating, anchorNote, headline, cards }` |
      | 4 | critic | `opus` | `${CLAUDE_SKILL_DIR}/references/critic-prompt.md` | same three paths + `{{DRAFT_JSON}}` = subagent 3's output | final `{ rating, anchorNote, headline, cards }` |
 
-     Order: 1 and 2 in parallel → write `/tmp/summaries.json` with `turns` + `consumers` → 3 (it reads
-     the turn kinds from that file) → 4 → add the critic's output as `tips` to `/tmp/summaries.json`.
+     The renderer already prepends its own deterministic "Prompt cache expired mid-session" card
+     whenever `summary.cacheRebuilds.count > 0` — the grader and critic prompts say not to write a
+     second one, so don't re-add it when merging.
+
+     Order: 1 and 2 in parallel → write `$W/summaries.json` with `turns` + `consumers` → 3 (it reads
+     the turn kinds from that file) → 4 → add the critic's output as `tips` to `$W/summaries.json`.
+     Skip subagent 4 (use the draft as-is) when the draft already passes the critic's two
+     mechanical checks — `rating` equals `summary.avoidable.band`, and a card names the
+     `compactionWhatIf.best` turn whenever that saving is material (≥ 2% of `totalCost` or
+     ≥ $0.10). A second opus pass earns its cost only when there is something to correct.
      With `--no-assess` (or cost < $0.50) skip all four and write
      `{ "tips": { "skipped": "--no-assess" } }` or `{ "tips": { "skipped": "session under $0.50" } }`.
 
      ```bash
      # 2. Merge + render (the renderer needs the FULL detail, not grader.json):
-     node ${CLAUDE_SKILL_DIR}/scripts/apply-summaries.js --summaries /tmp/summaries.json --record-grade < /tmp/detail.json \
-       | node ${CLAUDE_SKILL_DIR}/scripts/render-report.js
+     node ${CLAUDE_SKILL_DIR}/scripts/apply-summaries.js --summaries $W/summaries.json < $W/detail.json \
+       | node ${CLAUDE_SKILL_DIR}/scripts/render-report.js --record-grade
      ```
-     Add `--config-dir <path>` (same value passed to `analyze.js`) when the user gave one, so the
-     grade is recorded under that profile's state dir.
+     Add `--config-dir <path>` to `render-report.js` (same value passed to `analyze.js`) when the
+     user gave one, so the grade is recorded under that profile's state dir. `--record-grade` sits
+     on the renderer so the grade is only written once the report exists.
 
-     `/tmp/summaries.json` final shape:
+     `$W/summaries.json` final shape:
      `{ "turns": { "<turnIndex>": { "summary": "…", "kind": "…" } }, "consumers": { "<index>": "…" },
         "tips": { "rating": 2, "anchorNote": "…", "headline": "…", "cards": [ … ] } }`.
      `apply-summaries.js` merges it (turns by `turnIndex` → `summary` + `userKind`; consumers by
