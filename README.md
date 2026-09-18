@@ -76,6 +76,8 @@ cp -r skills/cc-cost-meter ~/.claude/skills/        # or a project's .claude/ski
     compaction what-if, grade history).
   - `references/`: the subagent prompts (turns, consumers, grader, critic).
   - `data/model_prices.json`: bundled LiteLLM price snapshot, the offline default.
+    `scripts/sync-prices.js` refreshes it from upstream; a daily GitHub Action opens a
+    PR when rates drift.
   - `assets/report-template.html`: the HTML report template. `assets/mock-detail.json` is the
     demo payload behind the [sample report](https://michalschroeder.github.io/cc-cost-meter/).
     Run `node scripts/render-report.js --mock --out ../../docs/index.html` to regenerate it.

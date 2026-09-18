@@ -27,6 +27,11 @@ node scripts/analyze.js <session-id-prefix>     # full per-session detail JSON
 node scripts/render-report.js --mock --out /tmp/mock-report.html
 ```
 
+```bash
+# Refresh the bundled price snapshot from upstream LiteLLM (the only networked script)
+node skills/cc-cost-meter/scripts/sync-prices.js
+```
+
 `analyze.js` reads transcripts from `--config-dir <path>` (or `$CLAUDE_CONFIG_DIR`, default
 `~/.claude`). There is no lint step.
 
