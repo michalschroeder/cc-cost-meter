@@ -7,7 +7,7 @@
 //
 //   node scripts/grader-view.js < detail.json > grader.json
 const CAP = 300;   // chars kept of each prompt / consumer target
-const TOP = 15;    // consumer rows kept
+const TOP = 20;    // consumer rows kept (matches the report's consumer table)
 
 const cap = (s) => String(s == null ? '' : s).slice(0, CAP);
 

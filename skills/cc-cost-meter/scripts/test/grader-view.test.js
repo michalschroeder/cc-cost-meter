@@ -19,7 +19,7 @@ test('grader-view: drops calls, caps prompts/targets, keeps summary', () => {
   assert.strictEqual(g.turns[0].prompt.length, 300);
   assert.ok(!('tokens' in g.turns[0]));
   assert.deepStrictEqual(g.turns[0].tools, [['Bash', 2]]);
-  assert.strictEqual(g.summary.contextConsumers.top.length, 15);
+  assert.strictEqual(g.summary.contextConsumers.top.length, 20);
   assert.strictEqual(g.summary.contextConsumers.top[0].target.length, 300);
   assert.strictEqual(g.summary.mainSteps, 2);
   assert.strictEqual(g.legend, 'L');

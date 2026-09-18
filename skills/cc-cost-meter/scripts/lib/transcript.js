@@ -135,4 +135,18 @@ function listSubagentTranscripts(sessionFile, sessionId) {
   } catch { return []; }
 }
 
-module.exports = { readTitleRecap, parseCompactions, findTranscript, projectDirs, listSessions, listSubagentTranscripts };
+// Every transcript file of one session: <root>/projects/*/<id>.jsonl in EVERY
+// project dir. A session resumed under another cwd has half its calls in each —
+// listSessions keeps only the newest, so detail views must gather them all here
+// (buildDetail takes the array) or they silently drop the other half.
+function sessionFiles(root, sessionId, dirs) {
+  const target = `${sessionId}.jsonl`;
+  const out = [];
+  for (const d of dirs || projectDirs(root)) {
+    const candidate = path.join(d, target);
+    try { if (fs.statSync(candidate).isFile()) out.push(candidate); } catch {}
+  }
+  return out;
+}
+
+module.exports = { readTitleRecap, parseCompactions, findTranscript, sessionFiles, projectDirs, listSessions, listSubagentTranscripts };

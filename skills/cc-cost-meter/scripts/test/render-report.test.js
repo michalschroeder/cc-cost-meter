@@ -713,3 +713,31 @@ test('render: advanced toc links are gated, basic ones are not', () => {
   assert.match(html, /<a id="toc-thinking" class="adv" href="#thinking">/);
   assert.match(html, /<a href="#where">Where it went<\/a>/);
 });
+
+// --- CLI: --record-grade writes the grade only once the HTML exists ----------------
+const { spawn } = require('child_process');
+const os = require('os');
+const RENDER = path.join(__dirname, '..', 'render-report.js');
+
+test('render cli: --record-grade appends to grades.jsonl after writing the report', async () => {
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'grades-'));
+  const out = path.join(xdg, 'r.html');
+  const p = JSON.parse(JSON.stringify(detail));
+  p.summary.avoidable = { band: 2, share: 0.4, total: 1 };
+  p.summary.aiAssessment = { rating: 3, headline: 'h', cards: [] };
+  await new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [RENDER, '--out', out, '--record-grade', '--config-dir', '/cfg/x'],
+      { env: { ...process.env, XDG_STATE_HOME: xdg } });
+    let err = ''; proc.stderr.on('data', (d) => (err += d)); proc.stdout.on('data', () => {});
+    proc.on('close', (c) => (c === 0 ? resolve() : reject(new Error(err))));
+    proc.stdin.write(JSON.stringify(p)); proc.stdin.end();
+  });
+  assert.ok(fs.existsSync(out), 'report written');
+  const lines = fs.readFileSync(path.join(xdg, 'cc-cost-meter', 'cfg_x', 'grades.jsonl'), 'utf8')
+    .trim().split('\n').map(JSON.parse);
+  assert.strictEqual(lines.length, 1);
+  assert.strictEqual(lines[0].session, p.session);
+  assert.strictEqual(lines[0].rating, 3);
+  assert.strictEqual(lines[0].band, 2);
+  assert.ok(typeof lines[0].ts === 'string');
+});

@@ -5,12 +5,11 @@
 // engine lives in ./lib, the price snapshot in ../data.
 const path = require('path');
 const os = require('os');
-const { readTitleRecap, projectDirs, listSessions, listSubagentTranscripts } = require('./lib/transcript');
+const { readTitleRecap, projectDirs, listSessions, sessionFiles, listSubagentTranscripts } = require('./lib/transcript');
 const { loadPricing } = require('./lib/pricing');
 const { aggregate } = require('./lib/cost-aggregate');
 const { buildDetail } = require('./lib/session-detail');
 const { sumPeriods } = require('./lib/periods');
-const { resolveBudget } = require('./lib/budget');
 const { resolveStateDir } = require('./lib/state');
 const { readGrades } = require('./lib/grades');
 
@@ -58,13 +57,24 @@ function sinceToTs(s) {
   return Math.floor(new Date(+m[1], +m[2] - 1, +m[3]).getTime() / 1000);
 }
 
+// Timestamp of the first billed call (ISO string), or null. The transcript's own
+// clock — the file mtime only says when the session was LAST written to.
+function firstCallTs(detail) {
+  const iso = (t) => { const d = new Date(t); return isNaN(d.getTime()) ? null : d.toISOString(); };
+  for (const c of detail.perCall || []) if (c.isMain && c.ts) { const v = iso(c.ts); if (v) return v; }
+  for (const c of detail.perCall || []) if (c.ts) { const v = iso(c.ts); if (v) return v; }
+  return null;
+}
+
 // Full-fidelity JSON for an LLM/agent to reason about *why* a session was costly.
 function analysisPayload(detail, id, ts, title, recap) {
+  const started = firstCallTs(detail);
   return {
     session: id,
     title: title || null,
     recap: recap || null,
-    startedAt: new Date(ts * 1000).toISOString(),
+    startedAt: started || new Date(ts * 1000).toISOString(),
+    lastActiveAt: new Date(ts * 1000).toISOString(),
     totalCost: detail.total,
     steps: detail.calls,
     unpriced: detail.unpriced,
@@ -77,7 +87,7 @@ function analysisPayload(detail, id, ts, title, recap) {
       'NOTE: a turn\'s tokens.cacheRead is a SUM across its steps, NOT the context size — use turn.avgContext / turn.peakContext and summary.contextGrowth (per-step cacheRead) for the real growth curve. ' +
       'A cacheWrite spike usually means the parent re-cached its whole context (e.g. on a subagent return). ' +
       'Use summary.byTurnKind for cost per kind of work, summary.toolTally for the canonical tool counts (do NOT re-aggregate calls[].tools — that over-counts), ' +
-      'summary.highContextCost for the FULL spend on calls above 200k context (an UPPER BOUND on what earlier compaction could have saved — a /compact shrinks context to a summary, not zero), and summary.contextResets for how many times context was cleared. ' +
+      'summary.highContextCost for the FULL spend on calls above 200k context (a size symptom, NOT a saving — for what compaction was worth use summary.compactionWhatIf), and summary.contextResets for how many times context was cleared. ' +
       'For the manual-vs-auto /compact story read summary.compactions[].trigger ("manual" = user typed /compact, "auto" = auto-compact at the limit) with its pre/post token counts — that is ground truth. contextResets equals summary.compactions.length when the transcript has boundary records (contextResetSource="compact_boundary"); only older transcripts fall back to the token-drop heuristic. NEVER infer "auto-compacted" from the reset count alone — if summary.compactions is empty, the trigger is simply unknown. ' +
       'summary.contextConsumers names WHAT filled the context — each tool result (which file was read, which command ran) and user prompt, with estimated tokens (~chars/4) and carriedCost (the re-read tax it incurred on every later step) — use it to say which exact file/command consumed the context; its assistant-text / assistant-thinking / assistant-tool-calls rows split the model\'s ' +
       'own output by kind (apportioned from exact output_tokens), so a fat assistant share means verbosity, not reads. ' +
@@ -98,7 +108,7 @@ function analysisPayload(detail, id, ts, title, recap) {
 }
 
 // Session list as JSON for an LLM/agent: one record per session, plus period totals.
-function listPayload(rows, costOf, per, budget, grades) {
+function listPayload(rows, costOf, per, grades) {
   return {
     sessions: rows.map((r) => {
       const { title, recap } = readTitleRecap(r.file);
@@ -106,14 +116,13 @@ function listPayload(rows, costOf, per, budget, grades) {
         session: r.id,
         title: title || null,
         recap: recap || null,
-        startedAt: new Date(r.ts * 1000).toISOString(),
+        lastActiveAt: new Date(r.ts * 1000).toISOString(),
         cost: costOf(r.id),
         grade: grades && grades.has(r.id) ? grades.get(r.id).rating : null,
         band: grades && grades.has(r.id) ? grades.get(r.id).band : null,
       };
     }),
     periods: { today: per.daily, week: per.weekly, month: per.monthly },
-    monthlyBudget: budget.budgetOptedOut ? null : budget.monthly,
   };
 }
 
@@ -131,7 +140,7 @@ function main() {
   let rows = listSessions(transcriptRoot, dirs);
 
   const stateDir = resolveStateDir(source);
-  const pricing = loadPricing(stateDir, { allowFetch: false });
+  const pricing = loadPricing();
 
   if (opts.detail !== undefined) {
     const matches = rows.filter((r) => r.id.startsWith(opts.detail));
@@ -145,7 +154,11 @@ function main() {
       process.exit(1);
     }
     const row = matches[0];
-    const detail = buildDetail(row.file, listSubagentTranscripts(row.file, row.id), pricing);
+    // Every project dir that holds this id (a resumed session is split across
+    // cwds), plus each copy's own subagents/ — not just the newest half.
+    const files = sessionFiles(transcriptRoot, row.id, dirs);
+    const subs = files.flatMap((f) => listSubagentTranscripts(f, row.id));
+    const detail = buildDetail(files.length ? files : [row.file], subs, pricing);
     const { title, recap } = readTitleRecap(row.file);
     process.stdout.write(JSON.stringify(analysisPayload(detail, row.id, row.ts, title, recap), null, 2) + '\n');
     return;
@@ -155,11 +168,10 @@ function main() {
   // buildDetail re-derives the one session it needs).
   const agg = aggregate(transcriptRoot, pricing);
   const costOf = (id) => { const ps = agg.perSession[id]; return ps ? ps.total : 0; };
-  const budget = resolveBudget(process.env.STATUSLINE_MONTHLY_BUDGET);
   const per = sumPeriods(agg.perSession, new Date());
   const grades = readGrades(stateDir);
   const emitJson = (rs) => process.stdout.write(
-    JSON.stringify(listPayload(rs, costOf, per, budget, grades), null, 2) + '\n');
+    JSON.stringify(listPayload(rs, costOf, per, grades), null, 2) + '\n');
 
   if (sinceTs != null) rows = rows.filter((r) => r.ts >= sinceTs);
   const cap = opts.last != null ? opts.last : (opts.since ? Infinity : 10);

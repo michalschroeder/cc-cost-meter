@@ -302,7 +302,7 @@ const fmtMins = (m) => {
 // the legend swatches, so chart and legend can't diverge).
 const tierClass = (v, highCtx, resetDrop) => (v >= highCtx ? 'c-high' : v >= resetDrop ? 'c-mid' : 'c-low');
 const KIND_CLASS = {
-  user: 'c-user', skill: 'c-skill', 'subagent-orchestration': 'c-orch',
+  user: 'c-user', skill: 'c-skill', command: 'c-skill', 'subagent-orchestration': 'c-orch',
   'session-start': 'c-start', overhead: 'c-dim',
 };
 
@@ -677,7 +677,7 @@ function render(detail, template) {
 // ---- cli ----------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const opts = { out: null, mock: false };
+  const opts = { out: null, mock: false, recordGrade: false, configDir: undefined };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') {
       const v = argv[i + 1];
@@ -685,6 +685,12 @@ function parseArgs(argv) {
       opts.out = v; i++;
     }
     else if (argv[i] === '--mock') opts.mock = true;
+    else if (argv[i] === '--record-grade') opts.recordGrade = true;
+    else if (argv[i] === '--config-dir') {
+      const v = argv[i + 1];
+      if (v == null || v.startsWith('--')) { process.stderr.write('render-report.js: --config-dir requires a path\n'); process.exit(1); }
+      opts.configDir = v; i++;
+    }
     else { process.stderr.write(`render-report.js: unexpected argument '${argv[i]}'\n`); process.exit(1); }
   }
   return opts;
@@ -720,6 +726,26 @@ async function main() {
   const out = opts.out || path.join(process.cwd(), `session-cost-${id}.html`);
   fs.writeFileSync(out, html);
   process.stdout.write(out + '\n');
+  if (opts.recordGrade) recordGrade_(detail, opts.configDir);
+}
+
+// Append this session's grade to the state dir's grades.jsonl — only after the
+// report exists, so a render failure can't leave a grade for a report nobody has.
+// Best-effort: a failure here is logged, never fatal.
+function recordGrade_(detail, configDir) {
+  const s = (detail && detail.summary) || {};
+  const ai = s.aiAssessment;
+  if (!ai || ai.rating == null) return;
+  try {
+    const { resolveStateDir } = require('./lib/state');
+    const { recordGrade } = require('./lib/grades');
+    const av = s.avoidable || {};
+    recordGrade(resolveStateDir(configDir !== undefined ? configDir : process.env.CLAUDE_CONFIG_DIR), {
+      session: detail.session, rating: ai.rating,
+      band: av.band != null ? av.band : null, share: av.share != null ? av.share : null,
+      ts: new Date().toISOString(),
+    });
+  } catch (e) { process.stderr.write(`render-report.js: could not record grade (${e.message})\n`); }
 }
 
 module.exports = { render, money, compactTokens, duration };

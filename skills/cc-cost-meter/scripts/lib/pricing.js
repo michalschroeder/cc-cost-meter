@@ -2,12 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const https = require('https');
 
 const BUNDLED = path.join(__dirname, '..', '..', 'data', 'model_prices.json');
-const LITELLM_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
-const FETCH_TTL_MS = 24 * 60 * 60 * 1000;
-const FETCH_RETRY_MS = 60 * 60 * 1000; // throttle attempts (success or failure) — keyed on a stamp file, so failing fetches don't retry every prompt
 
 // Valid per-token rate: finite, non-negative; clamp >1 down to 1. Else null.
 function sanitizeRate(v) {
@@ -102,62 +98,12 @@ function hashMap(map) {
   return h.digest('hex').slice(0, 12);
 }
 
-// Fire-and-forget LiteLLM fetch → <stateDir>/pricing.json. Never throws.
-function backgroundFetch(stateDir) {
-  try {
-    const req = https.get(LITELLM_URL, { timeout: 8000 }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); return; }
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => { body += c; });
-      res.on('end', () => {
-        try {
-          const raw = JSON.parse(body);
-          if (!isUsablePriceTable(raw)) return; // schema change / error body — keep the old table
-          fs.mkdirSync(stateDir, { recursive: true });
-          const tmp = path.join(stateDir, `pricing.json.${process.pid}`);
-          fs.writeFileSync(tmp, JSON.stringify({ fetchedAt: Date.now(), raw }));
-          fs.renameSync(tmp, path.join(stateDir, 'pricing.json'));
-        } catch {}
-      });
-    });
-    req.on('error', () => {});
-    req.on('timeout', () => req.destroy());
-    req.unref(); // don't keep the hook process alive for the fetch
-  } catch {}
-}
-
-// Sync load: cached fetch if present, else bundled snapshot. Kicks a background
-// refresh when the cache is older than 24h (unless allowFetch:false, or the
-// STATUSLINE_PRICING_NO_FETCH env is set — used by tests to stay offline and
-// avoid writing into the state dir).
-function loadPricing(stateDir, opts = {}) {
-  const allowFetch = opts.allowFetch !== undefined ? opts.allowFetch : !process.env.STATUSLINE_PRICING_NO_FETCH;
-  let raw = null, fetchedAt = 0;
-  try {
-    const c = JSON.parse(fs.readFileSync(path.join(stateDir, 'pricing.json'), 'utf8'));
-    if (c && c.raw) { raw = c.raw; fetchedAt = c.fetchedAt || 0; }
-  } catch {}
-  // Self-heal: a present-but-unusable cache file (junk-but-valid-JSON) must not
-  // stick for the 24h TTL and zero out all costs — fall back to bundled now, and
-  // the staleness check below still kicks a refresh.
-  if (raw && !isUsablePriceTable(raw)) { raw = null; fetchedAt = 0; }
-  if (!raw) { try { raw = JSON.parse(fs.readFileSync(BUNDLED, 'utf8')); } catch { raw = {}; } }
-  // Two gates: the 24h success-TTL (fetchedAt only advances on success) AND a 1h
-  // attempt-throttle (a stamp file written on every attempt). Without the stamp a
-  // persistently failing fetch — fetchedAt stuck at 0 — would fire on every prompt.
-  if (allowFetch && Date.now() - fetchedAt > FETCH_TTL_MS) {
-    const stamp = path.join(stateDir, 'pricing.last-attempt');
-    let lastAttempt = 0;
-    try { lastAttempt = fs.statSync(stamp).mtimeMs; } catch {}
-    if (Date.now() - lastAttempt > FETCH_RETRY_MS) {
-      try {
-        fs.mkdirSync(stateDir, { recursive: true });
-        fs.writeFileSync(stamp, '');
-      } catch {}
-      backgroundFetch(stateDir);
-    }
-  }
+// Load the bundled LiteLLM price snapshot. Offline by design: the analyzer never
+// fetches, so a price refresh means updating data/model_prices.json in the skill.
+function loadPricing() {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(BUNDLED, 'utf8')); } catch { raw = {}; }
+  if (!isUsablePriceTable(raw)) raw = {};
   const map = buildMap(raw);
   return { map, pricingHash: hashMap(map) };
 }

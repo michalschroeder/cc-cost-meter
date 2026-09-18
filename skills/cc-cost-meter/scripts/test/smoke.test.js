@@ -27,9 +27,7 @@ function writeTranscript(cfg, id, entries, when) {
 function runJson(args, cfg) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg,
-      XDG_STATE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'csl-st-')),
-      STATUSLINE_PRICING_NO_FETCH: '1',
-      STATUSLINE_MONTHLY_BUDGET: '0' };
+      XDG_STATE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'csl-st-')) };
     tmpDirs.push(env.XDG_STATE_HOME);
     const proc = spawn(process.execPath, [ANALYZE, ...args], { env });
     let out = '', err = '';
@@ -66,7 +64,8 @@ test('smoke: list payload has the documented top-level keys', async () => {
   const out = await runJson(['list'], cfg);
   assert.ok(Array.isArray(out.sessions));
   assert.deepStrictEqual(Object.keys(out.periods).sort(), ['month', 'today', 'week']);
-  assert.ok('monthlyBudget' in out);
+  assert.ok(typeof out.sessions[0].lastActiveAt === 'string');
+  assert.ok(!('startedAt' in out.sessions[0]), 'list ts is the file mtime = last activity');
   assert.strictEqual(out.sessions[0].session, 'smoke001');
 });
 
@@ -420,7 +419,7 @@ test('smoke: compactionWhatIf best is null when no boundary saves money', async 
 });
 
 // --- resumed (cross-cwd) sessions: buildDetail folds several main halves ---------
-// analyze.js only ever passes ONE main file, so the array form is exercised directly.
+// analyze.js gathers every projects/*/<id>.jsonl for the id (see the detail test below).
 const { buildDetail } = require('../lib/session-detail');
 const { loadPricing } = require('../lib/pricing');
 
@@ -430,7 +429,7 @@ function writeRawTranscript(dir, name, entries, when) {
   if (when != null) { const d = new Date(when * 1000); fs.utimesSync(file, d, d); }
   return file;
 }
-const bundledPricing = () => loadPricing(mkProfile(), { allowFetch: false });
+const bundledPricing = () => loadPricing();
 
 // A session resumed under a different cwd has one transcript half per project dir.
 // Turn indices must keep climbing across halves: the second half's pre-prompt calls
@@ -540,11 +539,70 @@ test('smoke: list rows carry the last recorded grade', async () => {
     JSON.stringify({ session: 'graded01', rating: 4, band: 3, share: 0.2, ts: 'b' }) + '\n');
   // runJson spawns with its own XDG_STATE_HOME → override for this call
   const out = await new Promise((resolve, reject) => {
-    const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg, XDG_STATE_HOME: xdg, STATUSLINE_PRICING_NO_FETCH: '1', STATUSLINE_MONTHLY_BUDGET: '0' };
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg, XDG_STATE_HOME: xdg };
     const proc = spawn(process.execPath, [ANALYZE, 'list'], { env });
     let o = '', e = ''; proc.stdout.on('data', (d) => (o += d)); proc.stderr.on('data', (d) => (e += d));
     proc.on('close', (c) => c === 0 ? resolve(JSON.parse(o)) : reject(new Error(e)));
   });
   assert.strictEqual(out.sessions[0].grade, 4);
   assert.strictEqual(out.sessions[0].band, 3);
+});
+
+const { resolveStateDir } = require('../lib/state');
+const { turnKind, promptText } = require('../lib/session-detail');
+
+// --- state dir profiles -----------------------------------------------------------
+// An explicit --config-dir pointing at the DEFAULT root must land in the same profile
+// as passing nothing, or a session gets two disjoint grade histories.
+test('state: the default config dir resolves to the flat profile however it is spelled', () => {
+  const prev = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = '/x';
+  const flat = resolveStateDir('');
+  assert.strictEqual(resolveStateDir(path.join(os.homedir(), '.claude')), flat);
+  assert.strictEqual(resolveStateDir(path.join(os.homedir(), '.claude') + '/'), flat);
+  assert.strictEqual(resolveStateDir('~/.claude'), flat);
+  assert.notStrictEqual(resolveStateDir('/other/.claude'), flat);
+  process.env.XDG_STATE_HOME = prev;
+});
+
+// --- turn kinds -------------------------------------------------------------------
+
+test('turn kinds: built-in commands are not skills, paths are not commands', () => {
+  assert.strictEqual(turnKind('/compact'), 'command');
+  assert.strictEqual(turnKind('/model opus'), 'command');
+  assert.strictEqual(turnKind('/cc-cost-meter 848c'), 'skill');
+  assert.strictEqual(turnKind('Base directory for this skill: /a/b/humanizer'), 'skill');
+  assert.strictEqual(turnKind('/etc is broken, fix it'), 'user');
+  assert.strictEqual(turnKind('<task-notification>done</task-notification>'), 'subagent-orchestration');
+  assert.strictEqual(turnKind('(session start)'), 'session-start');
+});
+
+test('prompts: a local command\'s echoed stdout is not a turn', () => {
+  const u = (t) => ({ type: 'user', message: { role: 'user', content: t } });
+  assert.strictEqual(promptText(u('<local-command-stdout>Set model to opus</local-command-stdout>')), null);
+  assert.strictEqual(promptText(u('<command-name>/compact</command-name>')), '/compact');
+  assert.strictEqual(promptText(u('do the thing')), 'do the thing');
+});
+
+// --- cross-cwd resumed sessions ---------------------------------------------------
+// The same id under two project dirs is ONE session: listSessions keeps the newest
+// file, so the detail run must gather both halves or half the spend disappears.
+test('smoke: detail folds every project dir holding the session id', async () => {
+  const cfg = mkProfile();
+  const half = (id, ts) => [user('do it', 'u-' + id),
+    step('m-' + id, ts, usage(10000, 500))];
+  const writeIn = (proj, entries, when) => {
+    const dir = path.join(cfg, 'projects', proj);
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, 'resumed1.jsonl');
+    fs.writeFileSync(f, entries.map((o) => JSON.stringify(o)).join('\n') + '\n');
+    const d = new Date(when * 1000); fs.utimesSync(f, d, d);
+  };
+  writeIn('-proj-a', half('a', '2024-06-01T10:00:00Z'), 1717200000);
+  writeIn('-proj-b', half('b', '2024-06-01T11:00:00Z'), 1717203600);
+  const out = await runJson(['resumed1'], cfg);
+  assert.strictEqual(out.steps, 2, 'both halves billed');
+  assert.strictEqual(out.turns.length, 2, 'one turn per half');
+  assert.strictEqual(out.startedAt, '2024-06-01T10:00:00.000Z', 'first billed call, not the file mtime');
+  assert.strictEqual(out.lastActiveAt, new Date(1717203600 * 1000).toISOString());
 });
