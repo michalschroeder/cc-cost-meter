@@ -58,16 +58,65 @@ Flags: `--config-dir <path>` (transcript root, default `~/.claude` or `$CLAUDE_C
 
 ## Install
 
-The skill lives in [`skills/cc-cost-meter/`](skills/cc-cost-meter). Copy that directory into
-your Claude Code skills location, then invoke `/cc-cost-meter`:
+Requires Node.js and Claude Code.
+
+**As a Claude Code plugin (recommended).** This repo is its own plugin marketplace. In a
+Claude Code session:
+
+```
+/plugin marketplace add michalschroeder/cc-cost-meter
+/plugin install cc-cost-meter@cc-cost-meter
+```
+
+Then run `/cc-cost-meter` as usual. The `/` menu lists it as `/cc-cost-meter:cc-cost-meter`
+because plugin skills are namespaced; the long form is only needed if another command already
+uses the short name. The skill also triggers on its own when you ask where a session's cost went. To update, run
+`/plugin marketplace update cc-cost-meter`, or turn on auto-update for the marketplace under
+**Marketplaces** in `/plugin`.
+
+**From a git clone.** The skill lives in [`skills/cc-cost-meter/`](skills/cc-cost-meter).
+Clone the repo and symlink that directory into your Claude Code skills location:
 
 ```bash
-cp -r skills/cc-cost-meter ~/.claude/skills/        # or a project's .claude/skills/
+git clone https://github.com/michalschroeder/cc-cost-meter.git ~/src/cc-cost-meter
+mkdir -p ~/.claude/skills
+ln -s ~/src/cc-cost-meter/skills/cc-cost-meter ~/.claude/skills/cc-cost-meter
 ```
+
+For a single project, link into `<project>/.claude/skills/` instead. If you use a custom
+config dir (`$CLAUDE_CONFIG_DIR`), link into its `skills/`.
+
+Start a new Claude Code session and run `/cc-cost-meter list` to check it works.
+
+**Update.** Pull the clone. The symlink picks up the new version, including the latest
+price snapshot:
+
+```bash
+git -C ~/src/cc-cost-meter pull
+```
+
+**Uninstall.** `rm ~/.claude/skills/cc-cost-meter` (removes only the link), then delete the clone.
+
+Prefer a plain copy? `cp -r skills/cc-cost-meter ~/.claude/skills/` works too, but you
+update by hand.
+
+**Via the [`skills`](https://github.com/vercel-labs/skills) CLI.** It installs straight from
+this GitHub repo:
+
+```bash
+npx skills add michalschroeder/cc-cost-meter -g -a claude-code
+```
+
+Drop `-g` to install into the current project instead. Update with `npx skills update`.
+
+> **Claude Code only.** The `skills` CLI can install into other agents (Cursor, Codex, …),
+> but this skill reads Claude Code transcripts and depends on Claude Code features, so it
+> won't work anywhere else. Keep `-a claude-code`.
 
 ## Layout
 
-- `skills/cc-cost-meter/`: the skill. Copy this into your skills location.
+- `.claude-plugin/`: plugin and marketplace manifests, so the repo installs via `/plugin`.
+- `skills/cc-cost-meter/`: the skill. Link or copy this into your skills location.
   - `SKILL.md`: the skill definition and workflow. Start here.
   - `scripts/analyze.js`: self-contained JSON analyzer. `grader-view.js` trims the payload
     for subagents, `apply-summaries.js` merges the model-written copy, `render-report.js`

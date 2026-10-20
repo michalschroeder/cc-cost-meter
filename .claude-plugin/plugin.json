@@ -1,0 +1,13 @@
+{
+  "name": "cc-cost-meter",
+  "displayName": "CC Cost Meter",
+  "description": "Explain where a Claude Code session's tokens and dollars went, and render an interactive HTML report.",
+  "author": {
+    "name": "Michal Schroeder",
+    "url": "https://github.com/michalschroeder"
+  },
+  "homepage": "https://michalschroeder.github.io/cc-cost-meter/",
+  "repository": "https://github.com/michalschroeder/cc-cost-meter",
+  "license": "MIT",
+  "keywords": ["cost", "tokens", "usage", "pricing", "report"]
+}

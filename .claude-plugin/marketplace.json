@@ -1,0 +1,15 @@
+{
+  "name": "cc-cost-meter",
+  "description": "Claude Code session cost analyzer",
+  "owner": {
+    "name": "Michal Schroeder",
+    "url": "https://github.com/michalschroeder"
+  },
+  "plugins": [
+    {
+      "name": "cc-cost-meter",
+      "source": "./",
+      "description": "Explain where a Claude Code session's tokens and dollars went, and render an interactive HTML report."
+    }
+  ]
+}
