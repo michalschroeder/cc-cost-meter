@@ -69,6 +69,13 @@
     "cache_read_input_token_cost": 0.000001,
     "cache_creation_input_token_cost_above_1hr": 0.00002
   },
+  "claude-mythos-5-2": {
+    "input_cost_per_token": 0.000008,
+    "output_cost_per_token": 0.00004,
+    "cache_creation_input_token_cost": 0.00001,
+    "cache_read_input_token_cost": 2e-7,
+    "cache_creation_input_token_cost_above_1hr": 0.000016
+  },
   "claude-mythos-5-1": {
     "input_cost_per_token": 0.00001,
     "output_cost_per_token": 0.00005,
